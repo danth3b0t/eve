@@ -38,10 +38,14 @@ The statements above describe specification writing. The repository now also con
 
 On September 9, 2026, `go test ./...`, `go vet ./...`, and `EVE_M0_NATIVE=1 go test -race ./tests/m0 -count=1 -v` passed on Linux/amd64. Native tests exercised the **frontend-only slice** of a pinned Bun/Turbo/Vite fixture across a committed baseline and two real Git worktrees. They also reproduced an unsupported process-env-only loader and ambient-variable conflicts. Provider-probe safety tests and pinned API checksum checks passed offline.
 
-The subsequent live run used the supplied development team token and project. The exact unfiltered root command selected independent Convex backends; cloud identity/key/expiry/URL checks, cross-deployment key rejection, and deletion/project-default preservation passed. All four deployments created across the preliminary and full runs were confirmed deleted. **The live test remains red** solely for the missing `EVE_M0_DEFAULT=eve-m0-public-default` project-development-default marker; regional URLs, browser execution and macOS remain unverified.
+The first supplied-token live runs demonstrated the unfiltered launch, cloud identity/keys/expiry/URLs, key isolation, exact deletion and preservation of project/default identities, but failed the missing-development-default marker checks. After the operator added that default, the full live test passed in 17.05 seconds, including all three inheritance assertions. All seven deployments across those runs were confirmed deleted. Regional URLs, browser execution and macOS remain unverified.
 
 ## M1 configuration foundation
 
 Strict Go manifest/user-config parsing, restricted references, public configuration resolution and lossless dotenv image preparation are now implemented. All bundled examples pass the Go validator. Unit tests, bounded fuzz runs, `go vet ./...`, `EVE_M0_NATIVE=1 go test -race ./... -count=1`, and `CGO_ENABLED=0 go test ./...` pass on Linux/amd64. Native tests also consume M1-generated file images through unchanged Bun/Turbo/Vite scripts.
 
-See [M1.md](M1.md) for precise scope. There is still no EVE CLI, filesystem publication engine, durable local registry, allocator or production provider adapter; the remaining milestones are not marked complete.
+The next slice adds protected SQLite state, immutable creation intents, per-process advisory locks, source/common-directory identity records and TCP block allocation. Real-process tests verify concurrent claims across two repositories, fresh database initialization, SIGKILL lock release, committed-candidate retention and uncommitted SQL rollback. Real IPv4/IPv6 sockets cover occupied ports and stable allocations after late conflicts. Database constraints, per-connection pragmas, private modes, unsafe links, newer-schema refusal and source replacement are tested.
+
+The complete Linux suite, native/race checks and CGo-disabled tests pass. State/allocator test executables also cross-compile with `CGO_ENABLED=0` for all four target OS/architectures; **this does not establish runtime behavior on macOS or arm64**.
+
+See [M1.md](M1.md) for precise scope. There is still no EVE CLI, Git lifecycle/publication engine or production provider adapter; the remaining milestones are not marked complete.

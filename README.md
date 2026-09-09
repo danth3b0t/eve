@@ -6,9 +6,9 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 ## Status
 
-**There is no EVE CLI yet.** M0's full Linux Bun/Turbo/Convex launch and management/key/expiry/cleanup paths have been exercised successfully. The live test still fails its missing project-development-default marker checks; macOS and regional URL validation remain open.
+**There is no EVE CLI yet.** M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
 
-The first M1 slice implements strict Go manifest validation, restricted interpolation, public configuration resolution, and lossless in-memory dotenv editing. Durable state, Git lifecycle, allocation and safe file publication are still pending; M2–M5 have not started.
+M1 now includes manifest validation, restricted interpolation, public configuration resolution, lossless dotenv images, protected SQLite state, advisory locks and durable TCP allocations. Git lifecycle, safe application-file publication and CLI commands are next; M2–M5 remain pending.
 
 See [docs/M0.md](docs/M0.md) for live evidence and the runbook, and [docs/M1.md](docs/M1.md) for implemented boundaries and the remaining local-core work.
 
@@ -25,7 +25,7 @@ The opt-in native test requires Go 1.27.0, Bun 1.4.2, Node, Git, and fixture dep
 ## Files
 
 - [schemas/eve.schema.json](schemas/eve.schema.json): parsed v1 TOML schema; semantic checks remain required.
-- [schemas/state-schema.sql](schemas/state-schema.sql): initial SQLite design.
+- [schemas/state-schema.sql](schemas/state-schema.sql): embedded initial SQLite schema used by `internal/state`.
 - [examples/](examples/): manifests for applications already consuming the declared files/keys.
 - [docs/VALIDATION.md](docs/VALIDATION.md): specification artifact checks and engineering status.
 - [testdata/native-launch/](testdata/native-launch/): pinned, ordinary Bun/Turbo/Vite/Convex baseline.

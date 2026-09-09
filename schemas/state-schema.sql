@@ -7,6 +7,8 @@ PRAGMA busy_timeout = 5000;
 
 BEGIN IMMEDIATE;
 
+-- "EVE1": distinguish this registry from an unrelated SQLite database.
+PRAGMA application_id = 1163281713;
 CREATE TABLE schema_migrations (
     version INTEGER PRIMARY KEY,
     applied_at_ms INTEGER NOT NULL
@@ -16,6 +18,8 @@ CREATE TABLE repositories (
     id TEXT PRIMARY KEY,
     common_dir TEXT NOT NULL UNIQUE,
     source_path TEXT NOT NULL,
+    common_identity TEXT NOT NULL UNIQUE,
+    source_identity TEXT NOT NULL,
     label TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
 );
