@@ -20,6 +20,7 @@ type envelope struct {
 		ID, Branch, Path, State, Phase string
 		Generation                     int
 	}
+	Existing bool
 	Error    struct{ Code, Message string }
 	Services map[string]struct {
 		Port int
@@ -124,6 +125,14 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 		t.Fatalf("JSON contract drift: %s", stdout)
 	}
 	path := created.Workspace.Path
+	repeatCode, repeatOut, _, repeat := command(t, binary, root, base, "create", "--json", "payments")
+	if repeatCode != 0 || !repeat.OK || !repeat.Existing || repeat.Workspace.ID != created.Workspace.ID || repeat.Workspace.Path != path {
+		t.Fatalf("repeat create was not exact: code=%d out=%s", repeatCode, repeatOut)
+	}
+	conflictCode, conflictOut, _, conflict := command(t, binary, root, base, "create", "--json", "--from", "main", "payments")
+	if conflictCode != 3 || conflict.Error.Code != "E_CREATE_EXISTS" {
+		t.Fatalf("retargeting repeat unexpectedly allowed: %d %s", conflictCode, conflictOut)
+	}
 	data, err := os.ReadFile(filepath.Join(path, "env", "generated.env"))
 	if err != nil || !strings.Contains(string(data), "PORT=") || !strings.Contains(string(data), "PUBLIC_NAME=cli-native") {
 		t.Fatal("native image not published")
@@ -227,6 +236,10 @@ func TestResumeCLICompletesInterruptedCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	s = nil
+	blockedCode, blockedOut, _, blocked := command(t, binary, root, base, "create", "--json", "resume-cli")
+	if blockedCode != 3 || blocked.Error.Code != "E_RESUME_REQUIRED" {
+		t.Fatalf("incomplete create selected replacement: %d %s", blockedCode, blockedOut)
+	}
 	code, stdout, _, resumed := command(t, binary, root, base, "resume", "--json", "resume-cli")
 	if code != 0 || !resumed.OK || resumed.Workspace.State != "prepared" || resumed.Workspace.Generation != 1 {
 		t.Fatalf("resume failed: code=%d stdout=%s", code, stdout)

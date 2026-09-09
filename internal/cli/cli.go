@@ -31,6 +31,7 @@ type output struct {
 	Services      map[string]service  `json:"services,omitempty"`
 	Resources     map[string]resource `json:"resources,omitempty"`
 	Verification  *verification       `json:"verification,omitempty"`
+	Existing      bool                `json:"existing,omitempty"`
 	Auth          map[string]string   `json:"auth,omitempty"`
 	Warnings      []string            `json:"warnings,omitempty"`
 	Error         *commandError       `json:"error,omitempty"`
@@ -198,6 +199,15 @@ func create(ctx context.Context, args []string) (*output, error) {
 	}
 	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
 	registered := false
+	if existing, existingErr := resolveWorkspace(ctx, g, s, branch); existingErr == nil {
+		if existing.State == "prepared" {
+			if *from != "" {
+				return nil, &domain.Error{Code: "E_CREATE_EXISTS", Message: "workspace already exists; --from cannot retarget it"}
+			}
+			return existingCreate(ctx, s, existing, registered)
+		}
+		return nil, &domain.Error{Code: "E_RESUME_REQUIRED", Message: "an active or failed operation already owns that branch; resume it rather than replacing identity", Path: existing.ID}
+	}
 	if codeOf(planErr) == "E_SOURCE_UNREGISTERED" {
 		if !*yes {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "first creation would register this canonical source checkout; rerun with --yes after review"}
@@ -238,6 +248,26 @@ func create(ctx context.Context, args []string) (*output, error) {
 		response.Warnings = append(response.Warnings, "Registered this canonical source checkout after explicit approval.")
 	}
 	response.Human = fmt.Sprintf("created %s\npath: %s\nUse the project's existing setup/start procedure; stop it before sync or destroy.\n", strconv.Quote(branch), prepared.Path)
+	return response, nil
+}
+func existingCreate(ctx context.Context, s *state.Store, workspaceInfo state.Workspace, registered bool) (*output, error) {
+	allocation, err := s.Allocation(ctx, workspaceInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	resourceRows, err := s.Resources(ctx, workspaceInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	response := success("create", workspaceInfo)
+	response.setServices(allocation)
+	response.setResources(resourceRows)
+	response.Existing = true
+	response.Verification = &verification{Configuration: "verified", Runtime: "not_checked", Code: "not_verified_by_eve", Data: "existing_workspace"}
+	if registered {
+		response.Warnings = append(response.Warnings, "Registered this canonical source checkout after explicit approval.")
+	}
+	response.Human = fmt.Sprintf("already prepared %s\npath: %s\n", quote(workspaceInfo.Branch), workspaceInfo.Path)
 	return response, nil
 }
 func resolveWorkspace(ctx context.Context, g *git.Client, s *state.Store, selector string) (state.Workspace, error) {
@@ -477,7 +507,7 @@ func exitCode(err error) int {
 		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
-	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED":
+	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED":
 		return 3
 	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2
@@ -508,6 +538,8 @@ func errorResult(command string, err error) *output {
 	case "E_CLEANUP_PENDING":
 		response.Error.NextAction = "stop or assess the listener, then rerun the same destroy command"
 	case "E_APPROVAL_REQUIRED":
+	case "E_RESUME_REQUIRED":
+		response.Error.NextAction = "run eve resume with the same branch or workspace ID"
 		response.Error.NextAction = "review the planned local effects and rerun with the listed safety flags"
 	case "E_WORKTREE_DIRTY":
 		response.Error.NextAction = "review changes or use --discard-changes to discard that work"

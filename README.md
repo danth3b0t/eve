@@ -21,6 +21,8 @@ eve destroy --yes feature/payments    # stop the ordinary project launcher first
 eve auth convex login --project team:slug --token-stdin
 ```
 
+Repeating `create` on a prepared branch returns its existing workspace without mutation; incomplete operations require `resume`.
+
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
