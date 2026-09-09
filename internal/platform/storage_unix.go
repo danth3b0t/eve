@@ -110,6 +110,12 @@ func CheckPrivate(path string, directory bool) (os.FileInfo, error) {
 	return info, nil
 }
 
+// ValidatePrivateInfo checks an already-open descriptor without reopening its
+// path. Callers must separately compare the descriptor with its directory entry.
+func ValidatePrivateInfo(info os.FileInfo, directory bool) error {
+	return privateInfo("", info, directory)
+}
+
 func privateInfo(path string, info os.FileInfo, directory bool) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return pathError("E_STATE_SYMLINK", "state objects must not be symlinks", path)

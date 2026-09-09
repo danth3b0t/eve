@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -189,6 +190,14 @@ func (r *root) inspect(ctx context.Context, raw string) (string, os.FileInfo, er
 		return "", nil, failure("E_FILE_CHANGED", "path changed during inspection", clean)
 	}
 	return clean, info, nil
+}
+
+func identity(info os.FileInfo) *domain.FileIdentity {
+	if info == nil {
+		return nil
+	}
+	st := info.Sys().(*syscall.Stat_t) // regular() checked availability during read
+	return &domain.FileIdentity{Identity: fmt.Sprintf("%x:%x", st.Dev, st.Ino), Mode: info.Mode(), Size: info.Size(), ModTimeNS: info.ModTime().UnixNano()}
 }
 
 type snapshot struct {

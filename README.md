@@ -8,7 +8,7 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 **There is no EVE CLI yet.** M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
 
-M1 includes configuration handling, protected SQLite state, durable TCP allocation, journaled Git creation, and bounded read-only file preflight/image preparation. Protected image storage, journaled publication and CLI integration are next; M2–M5 remain pending.
+M1 includes configuration handling, protected SQLite state, durable TCP allocation, journaled Git creation, file preflight, and protected image staging with HMAC fingerprints. Journaled application-file publication and CLI integration are next; M2–M5 remain pending.
 
 See [docs/M0.md](docs/M0.md) for live evidence and the runbook, and [docs/M1.md](docs/M1.md) for implemented boundaries and the remaining local-core work.
 

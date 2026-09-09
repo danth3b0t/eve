@@ -22,11 +22,12 @@ import (
 // Image is private input for a future journaled publisher, not authorization to
 // write. Never use an unjournaled WriteFile loop to materialize these images.
 type Image struct {
-	Path           string
-	Mode           os.FileMode
-	Tracked        bool
-	Data, Preimage []byte            `json:"-"`
-	Values         map[string]string `json:"-"`
+	Path             string
+	Mode             os.FileMode
+	Tracked          bool
+	PreimageIdentity *domain.FileIdentity
+	Data, Preimage   []byte            `json:"-"`
+	Values           map[string]string `json:"-"`
 }
 
 func (i Image) String() string   { data, _ := json.Marshal(i); return string(data) }
@@ -103,7 +104,7 @@ func (p *Plan) Prepare(ctx context.Context, g *git.Client, target domain.GitIden
 		if remaining < 0 {
 			return nil, failure("E_COPY_LIMIT", "final images exceed 256 MiB; narrow the manifest", "")
 		}
-		images = append(images, Image{Path: file.Path, Mode: 0600, Tracked: file.Tracked, Data: data, Preimage: bytes.Clone(preimages[file.Path].data), Values: maps.Clone(values[file.Path])})
+		images = append(images, Image{Path: file.Path, Mode: 0600, Tracked: file.Tracked, PreimageIdentity: identity(preimages[file.Path].info), Data: data, Preimage: bytes.Clone(preimages[file.Path].data), Values: maps.Clone(values[file.Path])})
 	}
 	// Recheck content as well as metadata: restored timestamps are not proof of
 	// unchanged inputs. No SQL or application write occurs between these checks.
