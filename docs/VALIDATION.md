@@ -52,4 +52,10 @@ The complete Linux suite, native/race checks and CGo-disabled tests pass. State/
 
 The next bounded slice implements Git-aware source registration/planning, pinned committed target manifests, hook-suppressed worktree creation, durable Git intent/identity checkpoints and branch-preserving removal primitives. Real Git/SQLite tests cover moved refs, invoking-worktree isolation, dirty files, ownership refusal and lost-response reconciliation without repeating creation. A blocked checkout filter demonstrated that Git writes its lock reason before checkout finishes; observation now requires a clean worktree, stable regular index and no index lock. Cancellation also terminates the filter's process group.
 
+## M1 read-only file preflight
+
+`PlanGit` now captures bounded source configuration/copy snapshots. `internal/files` selects tracked target content rather than dirty source bytes, validates original path components and actual target tracking/ignore policy, detects changed inputs, and prepares private local-only images without writing application files. Real worktree tests cover these boundaries, limits, links, private diagnostics and target-specific ignore rules. Git's `check-ignore` required explicitly disabling its incompatible global literal-pathspec flag.
+
+Linux tests, native/race checks, repeated file/lifecycle tests and CGo-disabled tests pass. Files/lifecycle test executables cross-compile for all four target OS/architectures; macOS/arm64 runtime behavior remains unverified. In-memory images do not establish protected staging, HMAC drift handling, journaled publication or crash recovery.
+
 See [M1.md](M1.md) for precise scope and remaining gates. There is still no EVE CLI, native-file publication engine, complete destroy/recovery lifecycle or production provider adapter.

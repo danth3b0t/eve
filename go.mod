@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.47.0
+	golang.org/x/text v0.42.0
 	modernc.org/sqlite v1.58.0
 )
 

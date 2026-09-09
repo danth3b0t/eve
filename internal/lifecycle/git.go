@@ -1,5 +1,5 @@
-// Package lifecycle coordinates domain boundaries. This file implements only
-// the Git slice; it is not create/prepared, publication, or full recovery.
+// Package lifecycle coordinates domain boundaries. This file implements Git
+// creation and read-only file planning, not prepared/publication or full recovery.
 package lifecycle
 
 import (
@@ -12,6 +12,7 @@ import (
 
 	"eve/internal/config"
 	"eve/internal/domain"
+	"eve/internal/files"
 	"eve/internal/git"
 	"eve/internal/state"
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ type GitPlan struct {
 	Repository  state.Repository
 	Source      git.Checkout
 	Target      git.Target
+	Files       *files.Plan // bounded private snapshots; JSON exposes only its report
 }
 
 // OpenForGit rejects repository-contained state before state.Open can create
@@ -78,6 +80,10 @@ func PlanGit(ctx context.Context, s *state.Store, g *git.Client, cwd, branch, fr
 	p.Target, err = g.Plan(ctx, p.Source, branch, from)
 	if err != nil {
 		return p, err
+	}
+	p.Files, err = files.Snapshot(ctx, g, p.Source.Identity, p.Target)
+	if err != nil {
+		return GitPlan{}, err
 	}
 	p.WorkspaceID = uuid.NewString()
 	p.Path, err = git.WorkspacePath(p.Source.Identity.Path, p.Repository.Label, p.Repository.ID, branch, p.WorkspaceID)
