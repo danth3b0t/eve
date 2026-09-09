@@ -163,3 +163,46 @@ func (s *Store) ManagementToken(ctx context.Context, provider, name string) (Man
 	profile.Provider, profile.Name = provider, name
 	return profile, string(data), nil
 }
+
+// DeleteCredentialObject removes only a referenced immutable secret after the
+// containing operation reaches its durable cleanup boundary. Missing objects
+// reconcile an earlier delete whose SQL response was lost.
+func (s *Store) DeleteCredentialObject(ctx context.Context, id string) error {
+	if s.readOnly {
+		return failure("E_STATE_READ_ONLY", "registry is open read-only")
+	}
+	var deleted sql.NullInt64
+	var metadata string
+	err := s.transaction(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT deleted_at_ms,metadata_json FROM credential_objects WHERE id=? AND kind='deployment_key'`, id).Scan(&deleted, &metadata)
+	})
+	if err != nil {
+		return err
+	}
+	if deleted.Valid {
+		return nil
+	}
+	var held struct{ SHA256 string }
+	if json.Unmarshal([]byte(metadata), &held) != nil {
+		return failure("E_CREDENTIAL_PROFILE", "credential checksum metadata is invalid")
+	}
+	objects, err := s.objects("secrets")
+	if err != nil {
+		return err
+	}
+	defer objects.Close()
+	verify := func(data []byte) bool {
+		digest := sha256.Sum256(data)
+		return private.Equal(held.SHA256, hex.EncodeToString(digest[:]))
+	}
+	readable, readErr := objects.Read(ctx, id, private.MaxBytes)
+	if readErr != nil {
+		// Let RemoveVerified distinguish missing from unsafe or changed content.
+		readable = nil
+	}
+	if err := objects.RemoveVerified(ctx, id, int64(len(readable)), verify); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE credential_objects SET deleted_at_ms=? WHERE id=? AND deleted_at_ms IS NULL`, time.Now().UnixMilli(), id)
+	return dbError(err)
+}

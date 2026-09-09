@@ -106,9 +106,6 @@ func (w *LockedWorkspace) BeginCreate(ctx context.Context, in CreateRequest) (st
 		if err != nil {
 			return err
 		}
-		if len(m.Resources) != 0 {
-			return failure("E_PROVIDER_UNIMPLEMENTED", "this state slice accepts local-only creation intents")
-		}
 		if in.Ports.MinPort < 1 || in.Ports.MinPort > in.Ports.MaxPort || in.Ports.MaxPort > 65535 || (len(m.Endpoints()) != 0 && m.Workspace.PortBlockSize > in.Ports.MaxPort-in.Ports.MinPort+1) {
 			return failure("E_PORT_RANGE", "workspace block must fit the configured user port range")
 		}
@@ -126,14 +123,17 @@ func (w *LockedWorkspace) BeginCreate(ctx context.Context, in CreateRequest) (st
 		intentJSON, _ := json.Marshal(createIntent{in.Ports.MinPort, in.Ports.MaxPort, m.Workspace.PortBlockSize, in.NewBranch})
 		hash := sha256.Sum256(in.Manifest)
 		operationID = uuid.NewString()
-		now := time.Now().UnixMilli()
+		createdAt := time.Now()
 		return w.store.transaction(ctx, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `INSERT INTO workspaces(id,repository_id,branch,path,head_oid,manifest_json,manifest_sha256,state,phase,created_at_ms,updated_at_ms) VALUES(?,?,?,?,?,?,?,'creating','reserve',?,?)`,
-				w.id, in.RepositoryID, in.Branch, in.Path, in.HeadOID, string(manifestJSON), hex.EncodeToString(hash[:]), now, now)
+				w.id, in.RepositoryID, in.Branch, in.Path, in.HeadOID, string(manifestJSON), hex.EncodeToString(hash[:]), createdAt.UnixMilli(), createdAt.UnixMilli())
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO operations(id,workspace_id,command,state,phase,intent_json,created_at_ms,updated_at_ms) VALUES(?,?,'create','pending','reserve',?,?,?)`, operationID, w.id, string(intentJSON), now, now)
+			if err := insertResourceRows(ctx, tx, w.id, *m, createdAt); err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO operations(id,workspace_id,command,state,phase,intent_json,created_at_ms,updated_at_ms) VALUES(?,?,'create','pending','reserve',?,?,?)`, operationID, w.id, string(intentJSON), createdAt.UnixMilli(), createdAt.UnixMilli())
 			if err != nil {
 				return err
 			}

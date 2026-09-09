@@ -59,7 +59,7 @@ func TestPublicationMissingParentsAndMutationTimeLinkChecks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			images, _, err := publicationImages(t.Context(), r.store, step, key, a)
+			images, _, err := publicationImages(t.Context(), r.store, w, step, key, a)
 			if err != nil {
 				t.Fatal(err)
 			}

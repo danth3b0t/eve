@@ -16,7 +16,8 @@ import (
 
 type DestroyOptions struct {
 	Approved, DiscardChanges, AssumeStopped bool
-	Probe                                   ports.Prober // nil uses real bounded TCP probes
+	Probe                                   ports.Prober  // nil uses real bounded TCP probes
+	ProviderFactory                         convexFactory // test/provider transport injection; nil uses real HTTPS
 }
 type DestroyResult struct {
 	Workspace state.Workspace
@@ -70,9 +71,6 @@ func destroySafety(ctx context.Context, s *state.Store, g *git.Client, step stat
 	if err := outsideState(s, source); err != nil {
 		return git.RemovalCheck{}, err
 	}
-	if len(step.Workspace.Manifest.Resources) != 0 {
-		return git.RemovalCheck{}, &domain.Error{Code: "E_PROVIDER_UNIMPLEMENTED", Message: "production Convex destruction is a separate intentional operation"}
-	}
 	if step.Identity.Path == source.Identity.Path || step.Identity.CommonIdentity != source.Identity.CommonIdentity || step.Identity.AdminDir == step.Identity.CommonDir {
 		return git.RemovalCheck{}, &domain.Error{Code: "E_GIT_OWNERSHIP", Message: "destroy identity no longer belongs to the registered source checkout"}
 	}
@@ -119,6 +117,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 		return DestroyResult{}, err
 	}
 	if step.State == "inflight" && checkAbsent {
+		if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
+			return DestroyResult{}, err
+		}
 		return finishDestroy(ctx, s, g, w, step)
 	}
 	r, err := s.Repository(ctx, step.Workspace.RepositoryID)
@@ -150,6 +151,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if _, err := destroySafety(ctx, s, g, step, opts, owned); err != nil {
 		return DestroyResult{}, err
 	}
+	if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
+		return DestroyResult{}, err
+	}
 	scratch, err := s.ScratchDir()
 	if err != nil {
 		return DestroyResult{}, err
@@ -172,6 +176,16 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	result, finishErr := finishDestroy(ctx, s, g, w, step)
 	result.Warning = check.Warning
 	return result, finishErr
+}
+func remoteDestructionForWorkspace(ctx context.Context, s *state.Store, w *state.LockedWorkspace, workspace state.Workspace, opts DestroyOptions) error {
+	if workspace.Manifest.Resources == nil || len(workspace.Manifest.Resources) == 0 {
+		return nil
+	}
+	factory := opts.ProviderFactory
+	if factory == nil {
+		factory = defaultConvexFactory
+	}
+	return destroyResources(ctx, s, w, workspace, factory)
 }
 
 func finishDestroy(ctx context.Context, s *state.Store, g *git.Client, w *state.LockedWorkspace, step state.DestroyStep) (DestroyResult, error) {
@@ -197,6 +211,17 @@ func finishDestroy(ctx context.Context, s *state.Store, g *git.Client, w *state.
 			return DestroyResult{Workspace: workspace}, &domain.Error{Code: "E_CLEANUP_PENDING", Message: "local worktree is gone, but an allocated endpoint still has a listener; repeated destroy can release claims after assessment"}
 		}
 		return DestroyResult{}, err
+	}
+	resources, err := w.Resources(ctx)
+	if err != nil {
+		return DestroyResult{}, err
+	}
+	for _, resource := range resources {
+		if resource.CredentialID != "" {
+			if err := s.DeleteCredentialObject(ctx, resource.CredentialID); err != nil {
+				return DestroyResult{}, err
+			}
+		}
 	}
 	if err := w.RecordDestroyed(ctx); err != nil {
 		return DestroyResult{}, err

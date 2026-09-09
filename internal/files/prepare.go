@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"eve/internal/config"
 	"eve/internal/domain"
 	"eve/internal/envfile"
 	"eve/internal/git"
@@ -33,10 +34,15 @@ type Image struct {
 func (i Image) String() string   { data, _ := json.Marshal(i); return string(data) }
 func (i Image) GoString() string { return i.String() }
 
-// Prepare validates an actual linked checkout and constructs all LOCAL-ONLY
-// final images without writing anything. This is still not loader compatibility,
-// provider binding, durable staging, HMAC drift tracking, or publication.
+// Prepare validates a linked checkout and constructs local configuration images.
+// Provider secrets must come through a verified provider lifecycle checkpoint.
 func (p *Plan) Prepare(ctx context.Context, g *git.Client, target domain.GitIdentity, in resolve.Inputs) ([]Image, error) {
+	return p.PrepareWithBindings(ctx, g, target, in, nil)
+}
+
+// PrepareWithBindings overlays only CONVEX_DEPLOYMENT/CONVEX_DEPLOY_KEY in a
+// declared resource destination. Values stay Excluded from JSON/reports.
+func (p *Plan) PrepareWithBindings(ctx context.Context, g *git.Client, target domain.GitIdentity, in resolve.Inputs, secrets map[string]map[string]string) ([]Image, error) {
 	checkout, err := g.Verify(ctx, target)
 	if err != nil {
 		return nil, err
@@ -67,8 +73,8 @@ func (p *Plan) Prepare(ctx context.Context, g *git.Client, target domain.GitIden
 	if err != nil {
 		return nil, err
 	}
-	if len(p.manifest.Resources) != 0 {
-		return nil, failure("E_PROVIDER_BINDING_PENDING", "resource images require verified private native bindings; no images are publishable", "")
+	if err := p.validateBindings(secrets); err != nil {
+		return nil, err
 	}
 	resolved, err := resolve.Resolve(p.manifest, in)
 	if err != nil {
@@ -77,6 +83,16 @@ func (p *Plan) Prepare(ctx context.Context, g *git.Client, target domain.GitIden
 	values := make(map[string]map[string]string)
 	for _, file := range resolved.Files {
 		values[file.Path] = file.Values
+	}
+	for name, overrides := range secrets {
+		merged := maps.Clone(values[name])
+		if merged == nil {
+			merged = make(map[string]string)
+		}
+		for key, value := range overrides {
+			merged[key] = value
+		}
+		values[name] = merged
 	}
 	var images []Image
 	remaining := MaxCopyBytes
@@ -145,6 +161,41 @@ func (p *Plan) Prepare(ctx context.Context, g *git.Client, target domain.GitIden
 		return nil, err
 	}
 	return images, nil
+}
+
+func (p *Plan) validateBindings(secrets map[string]map[string]string) error {
+	if len(p.manifest.Resources) == 0 && len(secrets) != 0 {
+		return failure("E_PROVIDER_INTENT", "resource bindings do not belong to this manifest", "")
+	}
+	if len(secrets) != len(p.manifest.Resources) {
+		return failure("E_PROVIDER_BINDING_PENDING", "verified deployment credentials are required for every resource", "")
+	}
+	expected := map[string]bool{}
+	for _, resource := range p.manifest.Resources {
+		name, err := config.RelativePath(resource.Path, resource.EnvFile)
+		if err != nil {
+			return err
+		}
+		if expected[name] {
+			return failure("E_NATIVE_ENV_CONFLICT", "separate resources would need distinct native selectors in one file", name)
+		}
+		expected[name] = true
+	}
+	for name, values := range secrets {
+		item, ok := p.inputs[name]
+		if !ok || !expected[name] || item.binding == nil || !item.binding.credential {
+			return failure("E_PROVIDER_INTENT", "binding destination is not a credential-only manifest declaration", name)
+		}
+		if len(values) != 2 || values["CONVEX_DEPLOYMENT"] == "" || values["CONVEX_DEPLOY_KEY"] == "" {
+			return failure("E_PROVIDER_INTENT", "exact native Convex selector and deployment key are required", name)
+		}
+		for key, value := range values {
+			if !config.ReservedLocalKey(key) || envfile.ValidateValue(value) != nil {
+				return failure("E_ENV_SERIALIZATION", "native binding cannot be represented safely", name)
+			}
+		}
+	}
+	return nil
 }
 
 func (p *Plan) checkTarget(ctx context.Context, g *git.Client, dest *root) (map[string]snapshot, error) {

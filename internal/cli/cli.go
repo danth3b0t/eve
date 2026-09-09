@@ -24,16 +24,17 @@ import (
 )
 
 type output struct {
-	SchemaVersion int                `json:"schema_version"`
-	Command       string             `json:"command"`
-	OK            bool               `json:"ok"`
-	Workspace     *workspace         `json:"workspace,omitempty"`
-	Services      map[string]service `json:"services,omitempty"`
-	Verification  *verification      `json:"verification,omitempty"`
-	Auth          map[string]string  `json:"auth,omitempty"`
-	Warnings      []string           `json:"warnings,omitempty"`
-	Error         *commandError      `json:"error,omitempty"`
-	Human         string             `json:"-"`
+	SchemaVersion int                 `json:"schema_version"`
+	Command       string              `json:"command"`
+	OK            bool                `json:"ok"`
+	Workspace     *workspace          `json:"workspace,omitempty"`
+	Services      map[string]service  `json:"services,omitempty"`
+	Resources     map[string]resource `json:"resources,omitempty"`
+	Verification  *verification       `json:"verification,omitempty"`
+	Auth          map[string]string   `json:"auth,omitempty"`
+	Warnings      []string            `json:"warnings,omitempty"`
+	Error         *commandError       `json:"error,omitempty"`
+	Human         string              `json:"-"`
 }
 type workspace struct {
 	ID         string `json:"id"`
@@ -46,6 +47,13 @@ type workspace struct {
 type service struct {
 	Port int    `json:"port"`
 	URL  string `json:"url"`
+}
+type resource struct {
+	Provider  string `json:"provider"`
+	Name      string `json:"name"`
+	URL       string `json:"url,omitempty"`
+	SiteURL   string `json:"site_url,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 type verification struct {
 	Configuration string `json:"configuration"`
@@ -214,7 +222,16 @@ func create(ctx context.Context, args []string) (*output, error) {
 	}
 	response := success("create", prepared)
 	response.setServices(allocation)
-	response.Verification = &verification{Configuration: "verified", Runtime: "not_checked", Code: "not_verified_by_eve", Data: "no_workspace_data_by_eve"}
+	resourceRows, err := s.Resources(ctx, prepared.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setResources(resourceRows)
+	data := "no_workspace_data_by_eve"
+	if len(resourceRows) != 0 {
+		data = "provider_empty_initial_state"
+	}
+	response.Verification = &verification{Configuration: "verified", Runtime: "not_checked", Code: "not_verified_by_eve", Data: data}
 	if registered {
 		response.Warnings = append(response.Warnings, "Registered this canonical source checkout after explicit approval.")
 	}
@@ -285,12 +302,21 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 		return nil, err
 	}
 	response.setServices(allocation)
+	resourceRows, err := s.Resources(ctx, workspaceInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setResources(resourceRows)
 	configuration := "incomplete"
 	if workspaceInfo.State == "prepared" && workspaceInfo.Generation == 1 {
 		configuration = "verified"
 	}
-	response.Verification = &verification{Configuration: configuration, Runtime: "not_checked", Code: "not_verified_by_eve", Data: "no_workspace_data_by_eve"}
-	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation))
+	data := "no_workspace_data_by_eve"
+	if len(resourceRows) != 0 {
+		data = "provider_empty_initial_state"
+	}
+	response.Verification = &verification{Configuration: configuration, Runtime: "not_checked", Code: "not_verified_by_eve", Data: data}
+	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows))
 	return response, nil
 }
 func destroy(ctx context.Context, args []string) (*output, error) {
@@ -358,6 +384,25 @@ func (o *output) setServices(a state.Allocation) {
 		o.Services[name] = service{Port: endpoint.Port, URL: endpoint.Scheme + "://" + net.JoinHostPort(endpoint.Host, strconv.Itoa(endpoint.Port))}
 	}
 }
+func (o *output) setResources(rows []state.Resource) {
+	if len(rows) == 0 {
+		return
+	}
+	o.Resources = map[string]resource{}
+	for _, row := range rows {
+		o.Resources[row.ResourceKey] = resource{Provider: row.Provider, Name: row.RemoteName, URL: row.Outputs["cloud_url"], SiteURL: row.Outputs["site_url"], ExpiresAt: row.Outputs["expires_at"]}
+	}
+}
+func resourcesHuman(rows []state.Resource) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	lines := []string{"resources:\n"}
+	for _, row := range rows {
+		lines = append(lines, fmt.Sprintf("  %s: %s %s expires=%s\n", row.ResourceKey, row.Provider, row.RemoteName, row.Outputs["expires_at"]))
+	}
+	return strings.Join(lines, "")
+}
 func servicesHuman(a state.Allocation) string {
 	if len(a.Endpoints) == 0 {
 		return "endpoints: none\n"
@@ -381,8 +426,10 @@ func exitCode(err error) int {
 		return 130
 	}
 	switch codeOf(err) {
-	case "E_PROVIDER_AUTH", "E_PROVIDER_IDENTITY":
-		return 4
+ case "E_PROVIDER_AUTH", "E_PROVIDER_IDENTITY", "E_CREDENTIAL_PROFILE", "E_PROVIDER_FORBIDDEN":
+  return 4
+ case "E_PROVIDER_RESOURCE", "E_PROVIDER_SERVER", "E_PROVIDER_TRANSPORT", "E_PROVIDER_AMBIGUOUS", "E_PROVIDER_CONTRACT", "E_PROVIDER_THROTTLED", "E_PROVIDER_CONFLICT":
+  return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
 	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED":

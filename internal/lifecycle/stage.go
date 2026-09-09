@@ -20,6 +20,9 @@ import (
 // Missing/partial objects remain unresolved, never rebuilt from today's source.
 // The caller retains this store's workspace lock across lifecycle boundaries.
 func StageFiles(ctx context.Context, s *state.Store, g *git.Client, locked *state.LockedWorkspace, plan *files.Plan) (state.FileStep, error) {
+	return StageFilesWithBindings(ctx, s, g, locked, plan, nil)
+}
+func StageFilesWithBindings(ctx context.Context, s *state.Store, g *git.Client, locked *state.LockedWorkspace, plan *files.Plan, provider *bindingResult) (state.FileStep, error) {
 	step, err := locked.FileStep(ctx)
 	if err != nil {
 		return state.FileStep{}, err
@@ -61,7 +64,19 @@ func StageFiles(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 		if !allocation.Ready {
 			return state.FileStep{}, &domain.Error{Code: "E_FILE_STEP_STATE", Message: "accepted allocation is required before staging"}
 		}
-		images, err = plan.Prepare(ctx, g, step.Identity, localInputs(step.Workspace, allocation))
+		input := localInputs(step.Workspace, allocation)
+		if len(step.Workspace.Manifest.Resources) != 0 {
+			if provider == nil {
+				return state.FileStep{}, &domain.Error{Code: "E_PROVIDER_BINDING_PENDING", Message: "verified resource outputs and credentials are required before staging"}
+			}
+			input.Resources = provider.outputs
+			images, err = plan.PrepareWithBindings(ctx, g, step.Identity, input, provider.secrets)
+		} else {
+			if provider != nil {
+				return state.FileStep{}, &domain.Error{Code: "E_PROVIDER_INTENT", Message: "resource bindings do not belong to this manifest"}
+			}
+			images, err = plan.Prepare(ctx, g, step.Identity, input)
+		}
 		if err != nil {
 			return state.FileStep{}, err
 		}

@@ -68,7 +68,7 @@ func PublishFiles(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if err != nil {
 		return state.Workspace{}, err
 	}
-	images, owners, err := publicationImages(ctx, s, p, key, allocation)
+	images, owners, err := publicationImages(ctx, s, w, p, key, allocation)
 	if err != nil {
 		return state.Workspace{}, err
 	}
@@ -120,11 +120,26 @@ func PublishFiles(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	return s.Workspace(ctx, p.Workspace.ID)
 }
 
-func publicationImages(ctx context.Context, s *state.Store, p state.Publication, key *private.Key, a state.Allocation) ([]files.PublicationFile, map[string]map[string][]string, error) {
-	if !a.Ready || len(p.Workspace.Manifest.Resources) != 0 {
-		return nil, nil, &domain.Error{Code: "E_PUBLICATION_PLAN", Message: "accepted local allocation is required"}
+func publicationImages(ctx context.Context, s *state.Store, w *state.LockedWorkspace, p state.Publication, key *private.Key, a state.Allocation) ([]files.PublicationFile, map[string]map[string][]string, error) {
+	if !a.Ready {
+		return nil, nil, &domain.Error{Code: "E_PUBLICATION_PLAN", Message: "accepted allocation is required"}
 	}
-	resolved, err := resolve.Resolve(&p.Workspace.Manifest, localInputs(p.Workspace, a))
+	resources, err := w.Resources(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	input := localInputs(p.Workspace, a)
+	input.Resources = map[string]resolve.ResourceOutputs{}
+	for _, r := range resources {
+		outputs, ok := r.Outputs["cloud_url"]
+		site := r.Outputs["site_url"]
+		name := r.Outputs["name"]
+		if !ok || site == "" || name == "" || r.State != "configured" || r.CredentialID == "" {
+			return nil, nil, &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "resource is not fully provisioned or configured"}
+		}
+		input.Resources[r.ResourceKey] = resolve.ResourceOutputs{URL: outputs, SiteURL: site, Deployment: r.Outputs["deployment"], Name: name, Reference: r.RemoteReference}
+	}
+	resolved, err := resolve.Resolve(&p.Workspace.Manifest, input)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -133,6 +148,29 @@ func publicationImages(ctx context.Context, s *state.Store, p state.Publication,
 	for _, f := range resolved.Files {
 		expected[f.Path] = f
 		owners[f.Path] = f.Owners
+	}
+	for _, r := range resources {
+		secret, err := w.DeployKeyCredential(ctx, r)
+		if err != nil {
+			return nil, nil, err
+		}
+		path := state.ResourceEnvFile(r)
+		file := expected[path]
+		if file.Values == nil {
+			file = resolve.File{Path: path, Values: map[string]string{}, Owners: map[string][]string{}}
+		}
+		if file.Owners == nil {
+			file.Owners = map[string][]string{}
+		}
+		if owners[path] == nil {
+			owners[path] = file.Owners
+		}
+		for name, value := range map[string]string{"CONVEX_DEPLOYMENT": "dev:" + r.RemoteName, "CONVEX_DEPLOY_KEY": secret} {
+			file.Values[name] = value
+			file.Owners[name] = []string{"resources." + r.ResourceKey}
+			owners[path][name] = file.Owners[name]
+		}
+		expected[path] = file
 	}
 	objects, err := s.PendingObjects()
 	if err != nil {

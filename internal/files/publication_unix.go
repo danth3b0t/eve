@@ -42,10 +42,11 @@ func (p Publisher) String() string   { return "files.Publisher" }
 func (p Publisher) GoString() string { return p.String() }
 
 // OpenPublisher is read-only. Its images must come from a complete durable
-// staging transaction. Receipt metadata alone never authorizes replacement.
+// Resource deployment bindings must already be present in those exact journaled
+// images. OpenPublisher performs no provider calls and does not recover secrets.
 func OpenPublisher(ctx context.Context, g *git.Client, id domain.GitIdentity, branch, head string, m *config.Manifest, images []PublicationFile) (*Publisher, error) {
-	if m == nil || len(m.Resources) != 0 || len(images) > MaxFiles {
-		return nil, failure("E_PUBLICATION_PLAN", "a bounded local-only publication is required", "")
+	if m == nil || len(images) > MaxFiles {
+		return nil, failure("E_PUBLICATION_PLAN", "a bounded publication batch is required", "")
 	}
 	tree, err := g.Tree(ctx, id.Path, head)
 	if err != nil {

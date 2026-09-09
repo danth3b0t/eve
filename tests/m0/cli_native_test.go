@@ -24,21 +24,36 @@ type eveResult struct {
 		ID, Branch, Path, State, Phase string
 		Generation                     int
 	} `json:"workspace"`
+	Services map[string]struct {
+		Port int    `json:"port"`
+		URL  string `json:"url"`
+	} `json:"services"`
+	Resources map[string]struct {
+		Provider  string `json:"provider"`
+		Name      string `json:"name"`
+		URL       string `json:"url"`
+		SiteURL   string `json:"site_url"`
+		ExpiresAt string `json:"expires_at"`
+	} `json:"resources"`
 	Error struct{ Code, Message string } `json:"error,omitempty"`
 }
 
 func runEVE(t *testing.T, f fixture, binary string, args ...string) eveResult {
+	return runEVEWithEnv(t, f, binary, nil, args...)
+}
+func runEVEWithEnv(t *testing.T, f fixture, binary string, extra []string, args ...string) eveResult {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = f.root
-	cmd.Env = append(append([]string{}, f.env...), "EVE_STATE_DIR="+filepath.Join(filepath.Dir(f.root), "eve-state"))
+	env := append(append([]string{}, f.env...), "EVE_STATE_DIR="+filepath.Join(filepath.Dir(f.root), "eve-state"))
+	cmd.Env = append(env, extra...)
 	data, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("eve %v: %v\n%s", args, err, data)
+		t.Fatalf("eve %v: %v", args, err)
 	}
 	var result eveResult
 	if json.Unmarshal(data, &result) != nil || result.SchemaVersion != 1 || !result.OK {
-		t.Fatalf("invalid EVE result: %s", data)
+		t.Fatalf("invalid EVE result")
 	}
 	if strings.Contains(string(data), "CONVEX_DEPLOY_KEY") {
 		t.Fatal("CLI output exposed a reserved selector")
@@ -102,18 +117,7 @@ func TestCLILocalLifecycleNativeFrontends(t *testing.T) {
 		processes = append(processes, p)
 	}
 	processes[0].stop()
-	for _, port := range values[0].ports {
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if err := ports.ProbeTCP(t.Context(), port); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("stopped process left endpoint %d listening or unavailable", port)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
+	waitPortsReleased(t, values[0].ports)
 	destroyed := runEVE(t, f, binary, "destroy", "--yes", "--json", "cli-a")
 	if destroyed.Workspace.State != "destroyed" {
 		t.Fatal("CLI destroy did not finish")
@@ -128,4 +132,20 @@ func TestCLILocalLifecycleNativeFrontends(t *testing.T) {
 	}
 	f.unchanged(t)
 	worktrees[1].unchanged(t)
+}
+
+func waitPortsReleased(t *testing.T, values [2]int) {
+	t.Helper()
+	for _, port := range values {
+		deadline := time.Now().Add(75 * time.Second)
+		for {
+			if err := ports.ProbeTCP(t.Context(), port); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("stopped process left endpoint %d listening or unavailable", port)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 }

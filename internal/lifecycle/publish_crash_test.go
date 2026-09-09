@@ -27,7 +27,7 @@ func publicationCheckpoint(t *testing.T, s *state.Store, g *git.Client, w *state
 	if err != nil {
 		t.Fatal(err)
 	}
-	images, _, err := publicationImages(t.Context(), s, p, key, a)
+	images, _, err := publicationImages(t.Context(), s, w, p, key, a)
 	if err != nil {
 		t.Fatal(err)
 	}

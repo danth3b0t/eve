@@ -28,7 +28,19 @@ func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, 
 	if _, err := PrepareGit(ctx, s, g, lock); err != nil {
 		return state.Workspace{}, state.Allocation{}, err
 	}
-	if _, err := StageFiles(ctx, s, g, lock, p.Files); err != nil {
+	workspaceBeforeProvision, err := s.Workspace(ctx, p.WorkspaceID)
+	if err != nil {
+		return state.Workspace{}, state.Allocation{}, err
+	}
+	if len(workspaceBeforeProvision.Manifest.Resources) != 0 {
+		bindings, err := ProvisionResources(ctx, s, lock, workspaceBeforeProvision)
+		if err != nil {
+			return state.Workspace{}, state.Allocation{}, err
+		}
+		if _, err := StageFilesWithBindings(ctx, s, g, lock, p.Files, &bindings); err != nil {
+			return state.Workspace{}, state.Allocation{}, err
+		}
+	} else if _, err := StageFiles(ctx, s, g, lock, p.Files); err != nil {
 		return state.Workspace{}, state.Allocation{}, err
 	}
 	prepared, err := PublishFiles(ctx, s, g, lock)

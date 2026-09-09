@@ -300,6 +300,37 @@ func (c *Client) VerifyDeployKeyMetadata(ctx context.Context, d Deployment, key 
 	}
 	return key, nil
 }
+
+func (c *Client) DeployKeyMetadata(ctx context.Context, d Deployment) ([]DeployKeyMetadata, error) {
+	var keys []DeployKeyMetadata
+	_, err := c.management(ctx, "GET", "/deployments/"+d.Name+"/list_deploy_keys", nil, &keys)
+	return keys, err
+}
+
+func (c *Client) DeleteDeployKey(ctx context.Context, d Deployment, name string) error {
+	keys, err := c.DeployKeyMetadata(ctx, d)
+	if err != nil {
+		return err
+	}
+	matched := 0
+	var id int64
+	for _, key := range keys {
+		if key.Name == name {
+			matched++
+			id = key.ID
+		}
+	}
+	if matched == 0 {
+		return failure("E_PROVIDER_NOT_FOUND", "recorded deploy key is already absent")
+	}
+	if matched != 1 || id <= 0 {
+		return failure("E_PROVIDER_IDENTITY", "deploy key name does not resolve to one owned identity")
+	}
+	_, err = c.management(ctx, "POST", "/deployments/"+d.Name+"/delete_deploy_key", struct {
+		ID int64 `json:"id"`
+	}{id}, nil)
+	return err
+}
 func (c *Client) CanonicalURLs(ctx context.Context, d Deployment, key string) (cloud, site string, err error) {
 	var out struct {
 		Cloud string `json:"convexCloudUrl"`
