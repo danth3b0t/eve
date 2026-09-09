@@ -1,0 +1,47 @@
+# Specification artifact validation
+
+**Date:** September 9, 2026  
+**Scope:** the documents, examples, and initial schemas in this bundle—not an EVE implementation.
+
+## Checks completed
+
+| Check | Result |
+|---|---|
+| JSON Schema meta-validation | `eve.schema.json` passes Draft 2020-12 schema validation. |
+| Example manifests | All three example TOML files parse and validate against the manifest schema. |
+| Invalid-manifest rejection | Empty manifest, unsupported version, undeclared service command field, and invalid TTL are rejected. |
+| Embedded examples | Every TOML and JSON fenced block in `SPEC.md` parses successfully. Code fences are balanced. |
+| SQLite initialization | `state-schema.sql` executes in a fresh in-memory SQLite database. |
+| Valid state operations | Repository/workspace registration, allocation, endpoint insertion, and an explicitly superseding operation succeed. |
+| Allocation/ownership rejection | Overlapping port claims, claims outside a block, endpoints referencing another workspace's claim, and mismatched slots fail. |
+| Allocation immutability | In-place claim reassignment, endpoint reallocation, and block resizing fail. |
+| Operation concurrency | A second unfinished operation for one workspace is rejected. Cancelling and linking a superseding operation succeeds. |
+| Database consistency | SQLite integrity check reports `ok`; foreign-key check returns no violations. |
+| Cross-reference check | Every cited source identifier in the spec has a bibliography entry. |
+
+Artifact checks used Python's TOML/JSON/SQLite libraries and a Draft 2020-12 JSON Schema validator. Python is **not** part of the proposed EVE runtime stack. These checks validate the schema's basic syntax and selected constraints; they do not replace application-level semantic validation or driver-specific tests.
+
+## Not implemented or executed
+
+No EVE binary, dotenv writer, Git lifecycle engine, provider adapter, or application launcher was implemented as part of producing this specification. In particular, the following have **not** been exercised here:
+
+- Real unchanged Bun/Turborepo launch graphs consuming generated per-service configuration.
+- Live Convex deployment creation, key issuance, expiration, backend binding, or cleanup.
+- The selected Go SQLite driver on Linux/macOS, filesystem crash recovery, interprocess locking, or concurrent real port allocation.
+- Security/fault-injection tests against symlinks, interrupted file publication, inherited credentials, or ambiguous cloud responses.
+
+Those are explicit acceptance tests and release gates in sections 20–22 of `SPEC.md`. Milestone M0 deliberately tests the two central integration assumptions before the broader implementation proceeds. The specification does not claim universal support for arbitrary environment loaders or that configured workspaces have already deployed code, seeded data, or authenticated successfully.
+
+## Subsequent M0 engineering probes
+
+The statements above describe specification writing. The repository now also contains opt-in M0 probes; see [M0.md](M0.md) for exact versions, commands, limitations, and the live runbook.
+
+On September 9, 2026, `go test ./...`, `go vet ./...`, and `EVE_M0_NATIVE=1 go test -race ./tests/m0 -count=1 -v` passed on Linux/amd64. Native tests exercised the **frontend-only slice** of a pinned Bun/Turbo/Vite fixture across a committed baseline and two real Git worktrees. They also reproduced an unsupported process-env-only loader and ambient-variable conflicts. Provider-probe safety tests and pinned API checksum checks passed offline.
+
+The subsequent live run used the supplied development team token and project. The exact unfiltered root command selected independent Convex backends; cloud identity/key/expiry/URL checks, cross-deployment key rejection, and deletion/project-default preservation passed. All four deployments created across the preliminary and full runs were confirmed deleted. **The live test remains red** solely for the missing `EVE_M0_DEFAULT=eve-m0-public-default` project-development-default marker; regional URLs, browser execution and macOS remain unverified.
+
+## M1 configuration foundation
+
+Strict Go manifest/user-config parsing, restricted references, public configuration resolution and lossless dotenv image preparation are now implemented. All bundled examples pass the Go validator. Unit tests, bounded fuzz runs, `go vet ./...`, `EVE_M0_NATIVE=1 go test -race ./... -count=1`, and `CGO_ENABLED=0 go test ./...` pass on Linux/amd64. Native tests also consume M1-generated file images through unchanged Bun/Turbo/Vite scripts.
+
+See [M1.md](M1.md) for precise scope. There is still no EVE CLI, filesystem publication engine, durable local registry, allocator or production provider adapter; the remaining milestones are not marked complete.
