@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"eve/internal/config"
+	"eve/internal/git"
+	"eve/internal/lifecycle"
+	"eve/internal/ports"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +31,13 @@ func fixture(t *testing.T) (string, string) {
 	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
+		configDir := filepath.Join(base, "config", "eve")
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("version = 1\n[ports]\nmin = 39400\nmax = 39500\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		t.Fatal(err)
 	}
 	root := filepath.Join(base, "source")
@@ -164,5 +175,70 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	}
 	if out := runGit(t, root, "status", "--porcelain", "--untracked-files=all"); out != "" {
 		t.Fatalf("source changed after lifecycle: %s", out)
+	}
+}
+
+func TestResumeCLICompletesInterruptedCreate(t *testing.T) {
+	base, root := fixture(t)
+	binary := filepath.Join(base, "eve")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Dir = "."
+	if data, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, data)
+	}
+	g, err := git.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := lifecycle.OpenForGit(t.Context(), g, root, filepath.Join(base, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if s != nil {
+			_ = s.Close()
+		}
+	}()
+	if _, err := lifecycle.RegisterSource(t.Context(), s, g, root); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := lifecycle.PlanGit(t.Context(), s, g, root, "resume-cli", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := s.LockWorkspace(plan.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := config.ParseUser([]byte("version = 1\n[ports]\nmin = 39400\nmax = 39500\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lock.BeginCreate(t.Context(), plan.Intent(user)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ports.Reserve(t.Context(), lock, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = nil
+	code, stdout, _, resumed := command(t, binary, root, base, "resume", "--json", "resume-cli")
+	if code != 0 || !resumed.OK || resumed.Workspace.State != "prepared" || resumed.Workspace.Generation != 1 {
+		t.Fatalf("resume failed: code=%d stdout=%s", code, stdout)
+	}
+	if resumed.Workspace.ID != plan.WorkspaceID || resumed.Workspace.Path != plan.Path {
+		t.Fatal("resume selected a replacement workspace")
+	}
+	if _, err := os.Stat(filepath.Join(plan.Path, "env", "generated.env")); err != nil {
+		t.Fatal("resume did not publish native image")
+	}
+	code, stdout, _, again := command(t, binary, root, base, "resume", "--json", "resume-cli")
+	if code != 0 || !again.OK || again.Workspace.State != "prepared" {
+		t.Fatalf("idempotent resumed failed: %d %s", code, stdout)
 	}
 }

@@ -8,7 +8,7 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
 
-The guarded CLI now supports `create`, `path`, `status`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. `resume`, `sync`, `gc`, discovery and M4–M5 remain pending.
+The guarded CLI now supports `create`, `path`, `status`, `resume`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. `sync`, `gc`, discovery and M4–M5 remain pending.
 
 Only explicit mutations are supported, and interactive approval is not implemented in this slice:
 
@@ -16,6 +16,7 @@ Only explicit mutations are supported, and interactive approval is not implement
 eve create --yes feature/payments       # branch worktree, reservations, native files
 eve path feature/payments
 eve status feature/payments
+eve resume feature/payments
 eve destroy --yes feature/payments    # stop the ordinary project launcher first
 eve auth convex login --project team:slug --token-stdin
 ```
@@ -23,7 +24,7 @@ eve auth convex login --project team:slug --token-stdin
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
-See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, and [docs/M2.md](docs/M2.md) for Convex provider behavior and remaining recovery gates.
+See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, [docs/M2.md](docs/M2.md) for Convex provider behavior, and [docs/M3.md](docs/M3.md) for current resume/recovery boundaries and remaining gates.
 
 ## Checks
 

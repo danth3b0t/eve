@@ -82,4 +82,8 @@ Production `eve` now provisions and destroys exact nondefault Convex dev deploym
 
 Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS/regional/browser/TTL-elapsed gates remain open.
 
-See [M1.md](M1.md) and [M2.md](M2.md) for scope. `resume`, `sync`, `gc`, discovery and release packaging are not implemented.
+## M3 initial resume
+
+`eve resume` now resumes the original operation from durable UUID, revision, manifest, allocation, resource and journal intent. Separate-process tests resume after Git interruption and a test fake proves one deployment is reconciled after an ambiguous create instead of another being created. Prepared resume is idempotent; failed/unknown or dirty states remain diagnostic.
+
+See [M1.md](M1.md), [M2.md](M2.md), and [M3.md](M3.md) for scope. `sync`, `gc`, discovery and release packaging are not implemented.

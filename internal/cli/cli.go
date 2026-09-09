@@ -109,6 +109,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return inspect(ctx, args[1:], true)
 	case "status":
 		return inspect(ctx, args[1:], false)
+	case "resume":
+		return resume(ctx, args[1:])
 	case "destroy":
 		return destroy(ctx, args[1:])
 	default:
@@ -319,6 +321,49 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows))
 	return response, nil
 }
+func resume(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("resume")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid resume options"}
+	}
+	if fs.NArg() > 1 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "resume accepts at most one workspace"}
+	}
+	selector := ""
+	if fs.NArg() == 1 {
+		selector = fs.Arg(0)
+	}
+	g, s, err := storeFor(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	workspaceInfo, err := resolveWorkspace(ctx, g, s, selector)
+	if err != nil {
+		return nil, err
+	}
+	resumed, err := lifecycle.ResumeWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.ResumeOptions{})
+	if err != nil {
+		return nil, err
+	}
+	response := success("resume", resumed)
+	allocation, err := s.Allocation(ctx, resumed.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setServices(allocation)
+	resourceRows, err := s.Resources(ctx, resumed.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setResources(resourceRows)
+	if resumed.State == "prepared" {
+		response.Human = fmt.Sprintf("resumed workspace %s\npath: %s\n", resumed.ID, resumed.Path)
+	} else {
+		response.Human = fmt.Sprintf("resumed %s for workspace %s\n", resumed.State, resumed.ID)
+	}
+	return response, nil
+}
 func destroy(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("destroy")
 	yes := fs.Bool("yes", false, "approve removal of the exact workspace")
@@ -426,10 +471,10 @@ func exitCode(err error) int {
 		return 130
 	}
 	switch codeOf(err) {
- case "E_PROVIDER_AUTH", "E_PROVIDER_IDENTITY", "E_CREDENTIAL_PROFILE", "E_PROVIDER_FORBIDDEN":
-  return 4
- case "E_PROVIDER_RESOURCE", "E_PROVIDER_SERVER", "E_PROVIDER_TRANSPORT", "E_PROVIDER_AMBIGUOUS", "E_PROVIDER_CONTRACT", "E_PROVIDER_THROTTLED", "E_PROVIDER_CONFLICT":
-  return 5
+	case "E_PROVIDER_AUTH", "E_PROVIDER_IDENTITY", "E_CREDENTIAL_PROFILE", "E_PROVIDER_FORBIDDEN":
+		return 4
+	case "E_PROVIDER_RESOURCE", "E_PROVIDER_SERVER", "E_PROVIDER_TRANSPORT", "E_PROVIDER_AMBIGUOUS", "E_PROVIDER_CONTRACT", "E_PROVIDER_THROTTLED", "E_PROVIDER_CONFLICT":
+		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
 	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED":
