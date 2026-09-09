@@ -43,6 +43,10 @@ func TestStageObjectsProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if phase := os.Getenv("EVE_TEST_PUBLISH_CHECKPOINT"); phase != "" {
+		publicationCheckpoint(t, s, g, w, phase)
+		return
+	}
 	source, err := g.Inspect(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)

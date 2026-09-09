@@ -24,6 +24,9 @@ func StageFiles(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 	if err != nil {
 		return state.FileStep{}, err
 	}
+	if step.Workspace.State != "creating" {
+		return state.FileStep{}, &domain.Error{Code: "E_FILE_STEP_STATE", Message: "initial staging is already complete"}
+	}
 	r, err := s.Repository(ctx, step.Workspace.RepositoryID)
 	if err != nil {
 		return state.FileStep{}, err
@@ -58,14 +61,7 @@ func StageFiles(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 		if !allocation.Ready {
 			return state.FileStep{}, &domain.Error{Code: "E_FILE_STEP_STATE", Message: "accepted allocation is required before staging"}
 		}
-		in := resolve.Inputs{Workspace: resolve.Workspace{ID: step.Workspace.ID, Slug: filepath.Base(step.Workspace.Path), Branch: step.Workspace.Branch}, Ports: map[resolve.Endpoint]int{}}
-		if allocation.Size != 0 {
-			in.Workspace.PortBase = &allocation.Base
-		}
-		for _, ep := range allocation.Endpoints {
-			in.Ports[resolve.Endpoint{Service: ep.Service, Name: ep.Name}] = ep.Port
-		}
-		images, err = plan.Prepare(ctx, g, step.Identity, in)
+		images, err = plan.Prepare(ctx, g, step.Identity, localInputs(step.Workspace, allocation))
 		if err != nil {
 			return state.FileStep{}, err
 		}
@@ -112,6 +108,17 @@ func StageFiles(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 		}
 	}
 	return locked.FileStep(ctx)
+}
+
+func localInputs(w state.Workspace, a state.Allocation) resolve.Inputs {
+	in := resolve.Inputs{Workspace: resolve.Workspace{ID: w.ID, Slug: filepath.Base(w.Path), Branch: w.Branch}, Ports: map[resolve.Endpoint]int{}}
+	if a.Size != 0 {
+		in.Workspace.PortBase = &a.Base
+	}
+	for _, ep := range a.Endpoints {
+		in.Ports[resolve.Endpoint{Service: ep.Service, Name: ep.Name}] = ep.Port
+	}
+	return in
 }
 
 func imageIntent(workspace, keyID string, key *private.Key, images []files.Image) state.FileIntent {

@@ -56,6 +56,21 @@ type Document struct {
 	eol   string
 }
 
+// GeneratedValue reads exactly one portable, unquoted EVE-generated value.
+// It is not a general dotenv evaluator; richer user-authored values are refused.
+func (d *Document) GeneratedValue(key string) (string, error) {
+	entries := d.keys[key]
+	if !ValidKey(key) || len(entries) != 1 {
+		return "", &Error{Code: "E_ENV_VALUE", Key: key, Reason: "exactly one generated assignment is required"}
+	}
+	a := entries[0]
+	value := string(d.input[a.start:a.end])
+	if err := ValidateValue(value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
 func letter(b byte) bool       { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
 func digit(b byte) bool        { return b >= '0' && b <= '9' }
 func space(b byte) bool        { return b == ' ' || b == '\t' }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -51,6 +52,26 @@ func TestStagingUsesFrozenAllocations(t *testing.T) {
 		if !strings.Contains("\n"+string(image.Data), "\n"+entry+"\n") {
 			t.Fatal("staged configuration did not use recorded allocation/identity")
 		}
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:"+strconv.Itoa(allocation.Endpoints[0].Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, err = PublishFiles(t.Context(), r.store, r.client, w)
+	errorCode(t, err, "E_PORT_OCCUPIED")
+	if _, err := os.Lstat(filepath.Join(p.Path, ".env.local")); !os.IsNotExist(err) {
+		t.Fatal("occupied endpoint allowed publication")
+	}
+	step, err := w.Publication(t.Context())
+	if err != nil || step.Started {
+		t.Fatal("occupied endpoint advanced publication intent")
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishFiles(t.Context(), r.store, r.client, w); err != nil {
+		t.Fatal(err)
 	}
 }
 

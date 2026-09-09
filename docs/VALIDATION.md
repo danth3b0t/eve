@@ -62,6 +62,12 @@ Linux tests, native/race checks, repeated file/lifecycle tests and CGo-disabled 
 
 The staging lifecycle now records opaque image references and keyed fingerprints before sensitive writes, verifies synced private objects, and checkpoints staging without publishing application files or completing a generation. Machine-key initialization is serialized; missing/partial/changed keys are never silently regenerated.
 
-Real Git/SQLite tests kill a subprocess after partial or complete image sets but before SQL acknowledgment. Complete sets reconcile from their original objects; incomplete sets remain unresolved. Tests also cover corruption with restored timestamps, key initialization concurrency, private permissions/link/type checks, bounded reads and value-free metadata/formatting. Linux native/race and CGo-disabled checks pass. Publication, drift-aware sync, snapshot cleanup and power-loss recovery remain unproven.
+Real Git/SQLite tests kill a subprocess after partial or complete image sets but before SQL acknowledgment. Complete sets reconcile from their original objects; incomplete sets remain unresolved. Tests also cover corruption with restored timestamps, key initialization concurrency, private permissions/link/type checks, bounded reads and value-free metadata/formatting. These staging tests alone do not establish publication, drift-aware sync, snapshot cleanup or power-loss recovery.
 
-See [M1.md](M1.md) for precise scope and remaining gates. There is still no EVE CLI, native-file publication engine, complete destroy/recovery lifecycle or production provider adapter.
+## M1 initial publication
+
+The production local-only lifecycle now commits `prepared` generation `1` after verified atomic per-file publication. Tests cover fresh Git/filesystem policy, occupied endpoints, missing parents, late parent-link substitution, no-replace rename, exact receipt reconciliation after SIGKILL, user-edit refusal and verified post-completion snapshot cleanup.
+
+`TestPublishedLifecycleNativeFrontends` prepares two real worktrees with production APIs and then runs unchanged Bun/Turbo/Vite frontend commands. Independent ports and public configuration pass; scripts/configuration/lockfiles remain unchanged. Installation and supervision are test-harness actions. The unprovisioned backend is excluded with the existing frontend filters; no live cloud or browser-execution claim follows.
+
+See [M1.md](M1.md) for scope and remaining gates. There is still no EVE CLI, complete destroy/recovery lifecycle or production provider adapter.

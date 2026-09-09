@@ -1,7 +1,7 @@
 //go:build linux || darwin
 
-// Package files authorizes and snapshots declared configuration inputs. It does
-// not publish application files or grant deletion authority.
+// Package files snapshots declared configuration inputs and applies journaled
+// publication through explicit receipt callbacks. It grants no deletion authority.
 package files
 
 import (

@@ -102,8 +102,13 @@ func readFileStep(ctx context.Context, tx *sql.Tx, id string) (FileStep, error) 
 	if err != nil {
 		return step, err
 	}
-	if w.State != "creating" || (w.Phase != "stage" && w.Phase != "publish") || w.Generation != 0 {
-		return step, failure("E_FILE_STEP_STATE", "workspace is not awaiting initial file staging")
+	completed := w.State == "prepared" && w.Phase == "complete" && w.Generation == 1
+	if completed {
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE workspace_id=? AND command='create' AND state='succeeded'`, id).Scan(&w.OperationID); err != nil {
+			return step, err
+		}
+	} else if w.State != "creating" || (w.Phase != "stage" && w.Phase != "publish") || w.Generation != 0 {
+		return step, failure("E_FILE_STEP_STATE", "workspace is not in its initial file transaction")
 	}
 	step.Workspace = w
 	var raw string
