@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EVE v0.1 manifest (parsed TOML object)",
+  "description": "This schema is structural. SPEC.md defines semantic path, ownership, interpolation, native-loader, provider, and safety requirements. Defaults are annotations, not automatic mutation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "copy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "port_block_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]{0,47}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/service"
+      }
+    },
+    "resources": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]{0,47}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/convexResource"
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "services"
+      ],
+      "properties": {
+        "services": {
+          "minProperties": 1
+        }
+      }
+    },
+    {
+      "required": [
+        "resources"
+      ],
+      "properties": {
+        "resources": {
+          "minProperties": 1
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "env_file"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path; canonical containment, link, and tracking rules require semantic validation."
+        },
+        "env_file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path; canonical containment, link, and tracking rules require semantic validation."
+        },
+        "port": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "host": {
+          "enum": [
+            "localhost",
+            "127.0.0.1",
+            "::1"
+          ],
+          "default": "localhost"
+        },
+        "scheme": {
+          "enum": [
+            "http",
+            "https"
+          ],
+          "default": "http"
+        },
+        "allow_tracked": {
+          "type": "boolean",
+          "default": false
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "ports": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,47}$",
+            "not": {
+              "enum": [
+                "primary"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/extraPort"
+          }
+        }
+      }
+    },
+    "extraPort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "env"
+      ],
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        }
+      }
+    },
+    "convexResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "path",
+        "project"
+      ],
+      "properties": {
+        "provider": {
+          "const": "convex",
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path; canonical containment, link, and tracking rules require semantic validation."
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^[^\\s/:]+:[^\\s/:]+$",
+          "description": "Exactly team-slug:project-slug; resolve and verify identity through Convex."
+        },
+        "env_file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path; canonical containment, link, and tracking rules require semantic validation.",
+          "default": ".env.local"
+        },
+        "credential_profile": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,47}$",
+          "default": "default"
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*[mhd]$",
+          "default": "5d"
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      }
+    }
+  }
+}

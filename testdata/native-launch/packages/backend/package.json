@@ -1,0 +1,7 @@
+{
+  "name": "@eve-m0/backend",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "convex dev" },
+  "dependencies": { "convex": "1.45.0" }
+}

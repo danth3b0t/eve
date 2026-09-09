@@ -1,0 +1,4 @@
+node_modules/
+.turbo/
+.env.local
+packages/backend/convex/_generated/

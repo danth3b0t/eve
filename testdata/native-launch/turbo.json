@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["PORT", "VITE_CONVEX_URL", "VITE_CONVEX_SITE_URL", "CONVEX_DEPLOYMENT", "CONVEX_DEPLOY_KEY"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "eve-m0-native-launch",
+  "private": true,
+  "packageManager": "bun@1.4.2",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo run dev"
+  },
+  "devDependencies": {
+    "turbo": "2.10.12"
+  }
+}

@@ -1,0 +1,19 @@
+version = 1
+
+[services.web]
+path = "apps/web"
+env_file = ".env.local"
+port = "PORT"
+
+[services.web.env]
+NEXT_PUBLIC_CONVEX_URL = "${resources.backend.url}"
+NEXT_PUBLIC_CONVEX_SITE_URL = "${resources.backend.site_url}"
+
+[resources.backend]
+provider = "convex"
+path = "packages/backend"
+project = "my-team:my-project"
+
+# Optional; retain only when this backend expects SITE_URL.
+[resources.backend.env]
+SITE_URL = "${services.web.url}"

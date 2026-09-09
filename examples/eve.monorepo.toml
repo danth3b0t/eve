@@ -1,0 +1,41 @@
+version = 1
+
+[workspace]
+# Copies only the additional inputs the existing apps actually load.
+copy = ["apps/*/.env"]
+port_block_size = 100
+
+[services.web]
+path = "apps/web"
+env_file = ".env.local"
+port = "PORT"
+
+[services.web.env]
+NEXT_PUBLIC_CONVEX_URL = "${resources.backend.url}"
+NEXT_PUBLIC_CONVEX_SITE_URL = "${resources.backend.site_url}"
+NEXT_PUBLIC_ADMIN_URL = "${services.admin.url}"
+
+# Declare this only when the unchanged app already reads HMR_PORT.
+[services.web.ports.hmr]
+env = "HMR_PORT"
+
+[services.admin]
+path = "apps/admin"
+env_file = ".env.local"
+port = "PORT"
+
+[services.admin.env]
+NEXT_PUBLIC_CONVEX_URL = "${resources.backend.url}"
+NEXT_PUBLIC_WEB_URL = "${services.web.url}"
+
+[resources.backend]
+provider = "convex"
+path = "packages/backend"
+project = "my-team:my-project"
+env_file = ".env.local"
+credential_profile = "default"
+ttl = "5d"
+
+[resources.backend.env]
+SITE_URL = "${services.web.url}"
+ADMIN_URL = "${services.admin.url}"

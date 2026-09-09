@@ -1,0 +1,7 @@
+{
+  "name": "@eve-m0/admin",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite" },
+  "devDependencies": { "vite": "8.2.2" }
+}

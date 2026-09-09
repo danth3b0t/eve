@@ -1,0 +1,21 @@
+# Valid only if the existing commands already read these distinct keys.
+# A shared file cannot give two processes different values of one PORT key.
+version = 1
+
+[services.web]
+path = "apps/web"
+env_file = "../../.env.local"
+port = "WEB_PORT"
+
+[services.web.env]
+NEXT_PUBLIC_CONVEX_URL = "${resources.backend.url}"
+
+[services.admin]
+path = "apps/admin"
+env_file = "../../.env.local"
+port = "ADMIN_PORT"
+
+[resources.backend]
+provider = "convex"
+path = "packages/backend"
+project = "my-team:my-project"
