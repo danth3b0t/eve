@@ -17,12 +17,13 @@ eve create --yes feature/payments       # branch worktree, reservations, native 
 eve path feature/payments
 eve status feature/payments
 eve destroy --yes feature/payments    # stop the ordinary project launcher first
+eve auth convex login --project team:slug --token-stdin
 ```
 
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
-See [docs/M0.md](docs/M0.md) for live evidence and the runbook, and [docs/M1.md](docs/M1.md) for implemented boundaries and the remaining local-core work.
+See [docs/M0.md](docs/M0.md) for live evidence and the runbook, [docs/M1.md](docs/M1.md) for local-core behavior, and [docs/M2.md](docs/M2.md) for implemented Convex authentication/provider boundaries.
 
 ## Checks
 

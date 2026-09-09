@@ -76,4 +76,8 @@ The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspace
 
 `TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, stops one normally, destroys it, and verifies that the other continues. The stopped harness closes client idle connections before signaling the application; without that, TIME_WAIT can hold an exclusive probe after the process exits. This is Linux frontend evidence only, not browser/Cloud/macOS proof.
 
-See [M1.md](M1.md) for scope and remaining gates. Production Convex, sync/resume/gc/discovery and release packaging are not implemented.
+## M2 authentication foundation
+
+The production Convex HTTP client and token-profile store now exist with offline contract evidence. `eve auth convex login` validates `team:project`, writes only protected token objects, refuses partial/changed secrets, and never puts tokens in SQL. This does not provision resources or provisioned native bindings yet.
+
+See [M1.md](M1.md) and [M2.md](M2.md) for scope. Convex provisioning, sync/resume/gc/discovery and release packaging are not implemented.

@@ -30,6 +30,7 @@ type output struct {
 	Workspace     *workspace         `json:"workspace,omitempty"`
 	Services      map[string]service `json:"services,omitempty"`
 	Verification  *verification      `json:"verification,omitempty"`
+	Auth          map[string]string  `json:"auth,omitempty"`
 	Warnings      []string           `json:"warnings,omitempty"`
 	Error         *commandError      `json:"error,omitempty"`
 	Human         string             `json:"-"`
@@ -92,6 +93,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "a command is required"}
 	}
 	switch args[0] {
+	case "auth":
+		return auth(ctx, args[1:])
 	case "create":
 		return create(ctx, args[1:])
 	case "path":
@@ -378,6 +381,8 @@ func exitCode(err error) int {
 		return 130
 	}
 	switch codeOf(err) {
+	case "E_PROVIDER_AUTH", "E_PROVIDER_IDENTITY":
+		return 4
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
 	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED":
