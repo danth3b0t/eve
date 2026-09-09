@@ -68,6 +68,7 @@ type CreateRequest struct {
 	RepositoryID, Branch, Path, HeadOID string
 	Manifest                            []byte `json:"-"` // committed target TOML, not source dotenv
 	Ports                               config.UserConfig
+	NewBranch                           bool
 }
 
 type Workspace struct {
@@ -79,8 +80,9 @@ type Workspace struct {
 	Manifest                                config.Manifest `json:"-"`
 }
 
-type portIntent struct {
+type createIntent struct {
 	Min, Max, Size int
+	NewBranch      bool
 }
 
 // BeginCreate commits the immutable local intent before Git/provider effects.
@@ -118,7 +120,7 @@ func (w *LockedWorkspace) BeginCreate(ctx context.Context, in CreateRequest) (st
 		if err != nil {
 			return failure("E_INTENT_INVALID", "manifest snapshot could not be encoded")
 		}
-		intentJSON, _ := json.Marshal(portIntent{in.Ports.MinPort, in.Ports.MaxPort, m.Workspace.PortBlockSize})
+		intentJSON, _ := json.Marshal(createIntent{in.Ports.MinPort, in.Ports.MaxPort, m.Workspace.PortBlockSize, in.NewBranch})
 		hash := sha256.Sum256(in.Manifest)
 		operationID = uuid.NewString()
 		now := time.Now().UnixMilli()

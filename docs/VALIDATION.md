@@ -48,4 +48,8 @@ The next slice adds protected SQLite state, immutable creation intents, per-proc
 
 The complete Linux suite, native/race checks and CGo-disabled tests pass. State/allocator test executables also cross-compile with `CGO_ENABLED=0` for all four target OS/architectures; **this does not establish runtime behavior on macOS or arm64**.
 
-See [M1.md](M1.md) for precise scope. There is still no EVE CLI, Git lifecycle/publication engine or production provider adapter; the remaining milestones are not marked complete.
+## M1 Git creation boundary
+
+The next bounded slice implements Git-aware source registration/planning, pinned committed target manifests, hook-suppressed worktree creation, durable Git intent/identity checkpoints and branch-preserving removal primitives. Real Git/SQLite tests cover moved refs, invoking-worktree isolation, dirty files, ownership refusal and lost-response reconciliation without repeating creation. A blocked checkout filter demonstrated that Git writes its lock reason before checkout finishes; observation now requires a clean worktree, stable regular index and no index lock. Cancellation also terminates the filter's process group.
+
+See [M1.md](M1.md) for precise scope and remaining gates. There is still no EVE CLI, native-file publication engine, complete destroy/recovery lifecycle or production provider adapter.

@@ -66,9 +66,9 @@ func (s *Store) Allocation(ctx context.Context, id string) (Allocation, error) {
 
 // reservationIntent only permits allocation changes before worktree creation.
 // There is intentionally no generic "release ports on failure" method.
-func reservationIntent(ctx context.Context, tx *sql.Tx, id string) (Workspace, portIntent, error) {
+func reservationIntent(ctx context.Context, tx *sql.Tx, id string) (Workspace, createIntent, error) {
 	w, err := scanWorkspace(tx.QueryRowContext(ctx, workspaceQuery, id))
-	var p portIntent
+	var p createIntent
 	if err != nil {
 		return w, p, err
 	}
