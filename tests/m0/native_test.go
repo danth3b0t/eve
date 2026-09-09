@@ -200,6 +200,7 @@ func (f fixture) start(t *testing.T, args ...string) *running {
 
 func (p *running) stop() {
 	p.once.Do(func() {
+		localHTTP.CloseIdleConnections() // client initiates closure before the server disappears
 		// Process management belongs exclusively to this test harness.
 		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
 		select {
@@ -208,6 +209,9 @@ func (p *running) stop() {
 			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 			<-p.done
 		}
+		// Some child pipelines can outlive a graceful parent exit. Harness cleanup
+		// must not leave a listener behind merely because that exit completed first.
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 	})
 }
 

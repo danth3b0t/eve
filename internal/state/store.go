@@ -20,6 +20,7 @@ import (
 type Store struct {
 	db         *sql.DB
 	root       string
+	readOnly   bool
 	identities map[string]os.FileInfo
 }
 
@@ -205,6 +206,9 @@ func (s *Store) Close() error { return dbError(s.db.Close()) }
 // prober, a provider, or another workspace lock from inside the callback.
 func (s *Store) transaction(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err := s.checkStorage(); err != nil {
+		if s.readOnly {
+			return failure("E_STATE_READ_ONLY", "registry is open read-only")
+		}
 		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil) // _txlock=immediate, on every connection.

@@ -76,3 +76,28 @@ func CheckEndpoints(ctx context.Context, a state.Allocation, probe Prober) error
 	}
 	return nil
 }
+
+// CheckStopped observes every declared endpoint before destruction. A port
+// listener is not identified as the project's process; it only blocks release.
+func CheckStopped(ctx context.Context, a state.Allocation, probe Prober, assumeStopped bool) error {
+	if probe == nil {
+		probe = ProbeTCP
+	}
+	for _, e := range a.Endpoints {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := probe(ctx, e.Port)
+		if err == nil {
+			continue
+		}
+		var d *domain.Error
+		if errors.As(err, &d) && d.Code == "E_PORT_OCCUPIED" && !assumeStopped {
+			return &domain.Error{Code: "E_POSSIBLY_RUNNING", Message: "an allocated endpoint still has a listener; stop the ordinary project launcher or confirm that you assessed it", Port: e.Port}
+		}
+		if err != nil && !(assumeStopped && errors.As(err, &d) && d.Code == "E_PORT_OCCUPIED") {
+			return err
+		}
+	}
+	return nil
+}

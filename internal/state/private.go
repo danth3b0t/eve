@@ -38,6 +38,9 @@ func (s *Store) PendingObjects() (*private.Objects, error) { return s.objects("p
 // complete lost-response write can be verified and re-synced on the next call.
 // The OS key lock precedes short SQL transactions; no SQL spans filesystem I/O.
 func (s *Store) HMACKey(ctx context.Context) (string, *private.Key, error) {
+	if s.readOnly {
+		return "", nil, failure("E_STATE_READ_ONLY", "registry is open read-only")
+	}
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}

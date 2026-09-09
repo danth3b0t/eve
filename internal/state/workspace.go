@@ -34,6 +34,9 @@ func (s *Store) LockWorkspace(id string) (*LockedWorkspace, error) {
 	if err := s.checkStorage(); err != nil {
 		return nil, err
 	}
+	if s.readOnly {
+		return nil, failure("E_STATE_READ_ONLY", "registry is open read-only; use a mutating operation context")
+	}
 	l, err := platform.TryLock(filepath.Join(s.root, "locks", "workspace-"+id+".lock"))
 	if errors.Is(err, platform.ErrLocked) {
 		return nil, failure("E_WORKSPACE_BUSY", "another EVE operation holds this workspace lock")

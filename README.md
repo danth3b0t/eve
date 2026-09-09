@@ -6,9 +6,21 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 ## Status
 
-**There is no EVE CLI yet.** M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
+M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
 
-M1's internal local-only lifecycle now prepares real worktrees through journaled native-file publication and verifies them through unchanged frontend launchers. CLI integration and complete destruction are next; production Convex and M3–M5 remain pending.
+The local-only EVE CLI now supports guarded `create`, `path`, `status`, and `destroy`. Two real worktrees pass unchanged Bun/Turbo/Vite frontend launch tests; stopping one normally and destroying it leaves the other running and preserves its Git branch/source checkout. Production Convex integration and M3–M5 remain pending.
+
+Only explicit mutations are supported, and interactive approval is not implemented in this slice:
+
+```sh
+eve create --yes feature/payments       # branch worktree, reservations, native files
+eve path feature/payments
+eve status feature/payments
+eve destroy --yes feature/payments    # stop the ordinary project launcher first
+```
+
+Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
+The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
 See [docs/M0.md](docs/M0.md) for live evidence and the runbook, and [docs/M1.md](docs/M1.md) for implemented boundaries and the remaining local-core work.
 

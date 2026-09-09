@@ -70,4 +70,10 @@ The production local-only lifecycle now commits `prepared` generation `1` after 
 
 `TestPublishedLifecycleNativeFrontends` prepares two real worktrees with production APIs and then runs unchanged Bun/Turbo/Vite frontend commands. Independent ports and public configuration pass; scripts/configuration/lockfiles remain unchanged. Installation and supervision are test-harness actions. The unprovisioned backend is excluded with the existing frontend filters; no live cloud or browser-execution claim follows.
 
-See [M1.md](M1.md) for scope and remaining gates. There is still no EVE CLI, complete destroy/recovery lifecycle or production provider adapter.
+## M1 local-only CLI and destruction
+
+The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, branch/source preservation, occupied ports, cleanup pending and port-claim release.
+
+`TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, stops one normally, destroys it, and verifies that the other continues. The stopped harness closes client idle connections before signaling the application; without that, TIME_WAIT can hold an exclusive probe after the process exits. This is Linux frontend evidence only, not browser/Cloud/macOS proof.
+
+See [M1.md](M1.md) for scope and remaining gates. Production Convex, sync/resume/gc/discovery and release packaging are not implemented.

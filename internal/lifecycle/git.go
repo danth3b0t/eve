@@ -1,5 +1,5 @@
-// Package lifecycle coordinates domain boundaries. This file implements Git
-// creation and read-only file planning, not prepared/publication or full recovery.
+// Package lifecycle coordinates the guarded LOCAL-ONLY create/prepared/destroy
+// boundaries. Providers, sync, full recovery and launcher supervision are separate.
 package lifecycle
 
 import (
@@ -42,6 +42,20 @@ func OpenForGit(ctx context.Context, g *git.Client, cwd, root string) (*state.St
 		return nil, err
 	}
 	return state.Open(ctx, canonical)
+}
+func OpenReadOnlyForGit(ctx context.Context, g *git.Client, cwd, root string) (*state.Store, error) {
+	checkout, err := g.Inspect(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	if err := g.Compatible(ctx, checkout); err != nil {
+		return nil, err
+	}
+	canonical, err := g.CheckStateLocation(ctx, checkout.Identity.Path, root)
+	if err != nil {
+		return nil, err
+	}
+	return state.OpenReadOnly(ctx, canonical)
 }
 
 // RegisterSource is called only after explicit registration consent. Manual
