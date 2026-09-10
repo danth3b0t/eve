@@ -13,10 +13,17 @@ import (
 	"slices"
 )
 
-type InitOptions struct{ Project string }
+type InitOptions struct {
+	Project, CredentialProfile, BackendPath, SiteURLService string
+	Convex, Update                                          bool
+}
+type InitBinding struct {
+	Key, Output string
+}
 type InitService struct {
-	ID, Path, Dev, ViteConfig string
-	PublicURL, PublicSiteURL  bool
+	ID, Path, Dev, ViteConfig, Port string
+	PublicURL, PublicSiteURL        bool
+	Bindings                        []InitBinding
 }
 type InitResult struct {
 	Manifest         []byte `json:"-"`
@@ -29,8 +36,9 @@ type InitResult struct {
 func proposalProblem(code, reason string) error { return &domain.Error{Code: code, Message: reason} }
 func (r InitResult) ManifestText() string       { return string(r.Manifest) }
 
-// ProposeInit restricts discovery to exact committed Bun/Vite and Convex
-// fixture evidence. It never evaluates package code or arbitrary env files.
+// ProposeInit compiles reviewed backend, consumer and listener evidence into
+// the existing v1 execution manifest. Backend discovery is independent from
+// any supported launcher; unresolved loader evidence never creates a port claim.
 func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOptions) (InitResult, error) {
 	checkout, err := g.Inspect(ctx, root)
 	if err != nil {
@@ -43,26 +51,41 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 	if err != nil {
 		return InitResult{}, err
 	}
-	if _, hasManifest := tree["eve.toml"]; hasManifest {
-		return InitResult{}, proposalProblem("E_INIT_EXISTS", "eve.toml already exists at the target revision")
+	existing, err := loadExistingInitManifest(ctx, g, checkout, tree, options.Update)
+	if err != nil {
+		return InitResult{}, err
 	}
-	result := InitResult{Evidence: []string{"Committed filesystem/JSON/package patterns only; commands are not evaluated."}}
+	result := InitResult{Evidence: []string{"Committed filesystem/JSON/package evidence; package commands and dotenv values are not executed."}}
 	services := exploreVitePackages(ctx, g, checkout, tree, &result)
 	if len(services) == 0 {
-		result.Warnings = append(result.Warnings, "No strictly supported Bun/Vite package layout was identified.")
-		return result, proposalProblem("E_INIT_DISCOVERY", "no exact supported service layout was identified; write eve.toml manually")
+		result.Warnings = append(result.Warnings, "No package with native PORT loader evidence was identified; backend-only configuration may still be valid.")
 	}
 	result.Services = services
 	backends, err := findConvexBackends(ctx, g, checkout, tree)
 	if err != nil {
 		return result, err
 	}
-	if len(backends) > 1 {
-		return result, proposalProblem("E_INIT_AMBIGUOUS", "multiple Convex backend candidates require explicit manual configuration: "+strings.Join(backends, ", "))
-	}
 	backend := ""
-	if len(backends) == 1 {
-		backend = backends[0]
+	if options.BackendPath != "" {
+		for _, candidate := range backends {
+			if candidate == options.BackendPath {
+				backend = candidate
+				break
+			}
+		}
+		if backend == "" {
+			return result, proposalProblem("E_INIT_AMBIGUOUS", "explicit Convex backend path is not a single discovered candidate: "+strings.Join(backends, ", "))
+		}
+	} else {
+		if len(backends) > 1 {
+			return result, proposalProblem("E_INIT_AMBIGUOUS", "multiple Convex backend candidates require explicit selection: "+strings.Join(backends, ", "))
+		}
+		if len(backends) == 1 {
+			backend = backends[0]
+		}
+	}
+	if options.Convex && backend == "" {
+		return result, proposalProblem("E_INIT_DISCOVERY", "no Convex backend was identified; pass an explicit backend path after committing its convex.json/package evidence")
 	}
 	result.HasConvexBackend = backend != ""
 	if backend != "" {
@@ -73,6 +96,9 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 	} else if options.Project != "" {
 		return result, proposalProblem("E_PROVIDER_INTENT", "--project was supplied but no exact Convex backend pattern was identified")
 	}
+	if len(services) == 0 && backend == "" {
+		return result, proposalProblem("E_INIT_DISCOVERY", "no supported service or provider layout was identified; write eve.toml manually")
+	}
 	for i := range services {
 		public, err := scanServicePublicKeys(ctx, g, checkout, tree, services[i].Path)
 		if err != nil {
@@ -80,12 +106,28 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 		}
 		services[i].PublicURL = public["VITE_CONVEX_URL"]
 		services[i].PublicSiteURL = public["VITE_CONVEX_SITE_URL"]
+		if services[i].PublicURL {
+			services[i].Bindings = append(services[i].Bindings, InitBinding{Key: "VITE_CONVEX_URL", Output: "url"})
+		}
+		if services[i].PublicSiteURL {
+			services[i].Bindings = append(services[i].Bindings, InitBinding{Key: "VITE_CONVEX_SITE_URL", Output: "site_url"})
+		}
 	}
-	result.Manifest = renderInitManifest(services, backend, options.Project)
+	if err := importEnvBindings(ctx, checkout, services); err != nil {
+		return result, err
+	}
+	merged, err := mergeInitManifest(existing, services, backend, options)
+	if err != nil {
+		return result, err
+	}
+	result.Manifest = renderInitManifest(merged)
 	if backend == "" {
 		result.Warnings = append(result.Warnings, "No exact Convex backend discovered; generated manifest is LOCAL-ONLY.")
 	} else {
-		result.Warnings = append(result.Warnings, "SITE_URL is intentionally unresolved; map it to a reviewed service manually if the backend requires it.")
+		if options.SiteURLService == "" {
+			result.Warnings = append(result.Warnings, "No backend SITE_URL override is declared; Convex development defaults remain the source for shared remote configuration.")
+		}
+		result.Evidence = append(result.Evidence, "Convex development defaults are the zero-override backend configuration baseline; env list/update is skipped when no overrides are declared.")
 	}
 	return result, nil
 }
@@ -111,16 +153,19 @@ func exploreVitePackages(ctx context.Context, g *git.Client, c git.Checkout, tre
 			result.Warnings = append(result.Warnings, "not the proven exact `vite` leaf command: "+base)
 			continue
 		}
-		configEntry := tree[path.Join(base, "vite.config.js")]
-		config, err := g.Blob(ctx, c.Identity.Path, configEntry, 1<<20)
+		configName := prefixes[base]
+		config, err := g.Blob(ctx, c.Identity.Path, tree[configName], 1<<20)
 		if err != nil {
 			result.Warnings = append(result.Warnings, "Vite config unreadable: "+base)
 			continue
 		}
 		text := string(config)
-		if !strings.Contains(text, "loadEnv(") || !strings.Contains(text, "strictPort") || !strings.Contains(text, "PORT") {
-			result.Warnings = append(result.Warnings, "Vite config does not prove native PORT loading and strictPort: "+base)
-			continue
+		nativePort := strings.Contains(text, "loadEnv(") && strings.Contains(text, "strictPort") && strings.Contains(text, "PORT")
+		port := ""
+		if nativePort {
+			port = "PORT"
+		} else {
+			result.Warnings = append(result.Warnings, "Vite config does not prove native strict PORT loading; no endpoint is assigned for "+base)
 		}
 		ignored, err := g.Ignored(ctx, c.Identity.Path, baseEnvPath(base))
 		if err != nil || !ignored {
@@ -131,19 +176,27 @@ func exploreVitePackages(ctx context.Context, g *git.Client, c git.Checkout, tre
 		if id == "" {
 			continue
 		}
-		services = append(services, InitService{ID: id, Path: base, Dev: "vite", ViteConfig: base + "/vite.config.js"})
-		result.Evidence = append(result.Evidence, "service "+id+": exact vite leaf and native PORT evidence "+configEntry.OID)
+		services = append(services, InitService{ID: id, Path: base, Dev: "vite", ViteConfig: configName, Port: port})
+		if port != "" {
+			result.Evidence = append(result.Evidence, "service "+id+": exact vite leaf and native PORT evidence "+tree[configName].OID)
+		} else {
+			result.Evidence = append(result.Evidence, "service "+id+": exact vite leaf; listener support remains unresolved")
+		}
 	}
 	return services
 }
-func vitePrefixes(tree map[string]git.TreeEntry) map[string]bool {
-	set := map[string]bool{}
-	for name, entry := range tree {
+func vitePrefixes(tree map[string]git.TreeEntry) map[string]string {
+	set := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(tree)) {
+		entry := tree[name]
 		if entry.Mode != "100644" {
 			continue
 		}
-		if path.Base(name) == "vite.config.js" {
-			set[path.Dir(name)] = true
+		base := path.Base(name)
+		if base == "vite.config.js" || base == "vite.config.ts" {
+			if _, exists := set[path.Dir(name)]; !exists {
+				set[path.Dir(name)] = name
+			}
 		}
 	}
 	return set
@@ -228,25 +281,5 @@ func validateInitProject(project string) error {
 		return proposalProblem("E_PROVIDER_IDENTITY", "explicit lower-case team:project binding required for discovered Convex backend")
 	}
 	return nil
-}
-func renderInitManifest(services []InitService, backend, project string) []byte {
-	var out strings.Builder
-	out.WriteString("# Review before use: listener/resource ownership is not inferred.\nversion = 1\n")
-	if backend != "" {
-		out.WriteString("\n[resources.backend]\nprovider = \"convex\"\npath = " + tomlString(backend) + "\nproject = " + tomlString(project) + "\n")
-	}
-	for _, service := range services {
-		out.WriteString("\n[services." + service.ID + "]\npath = " + tomlString(service.Path) + "\nenv_file = \".env.local\"\nport = \"PORT\"\n")
-		if backend != "" && (service.PublicURL || service.PublicSiteURL) {
-			out.WriteString("\n[services." + service.ID + ".env]\n")
-			if service.PublicURL {
-				out.WriteString("VITE_CONVEX_URL = \"${resources.backend.url}\"\n")
-			}
-			if service.PublicSiteURL {
-				out.WriteString("VITE_CONVEX_SITE_URL = \"${resources.backend.site_url}\"\n")
-			}
-		}
-	}
-	return []byte(out.String())
 }
 func tomlString(value string) string { return fmt.Sprintf("%q", value) }
