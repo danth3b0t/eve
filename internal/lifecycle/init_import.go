@@ -47,6 +47,9 @@ var knownConvexBindings = map[string]string{
 }
 
 func importEnvBindings(ctx context.Context, checkout git.Checkout, services []InitService, backend string) error {
+	if len(services) == 0 {
+		return nil
+	}
 	hints := map[string]string{}
 	if backend != "" {
 		data, _, err := files.ReadDestination(ctx, checkout.Identity, baseEnvPath(backend))

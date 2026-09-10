@@ -21,6 +21,7 @@ func backendOnlyFixture(t *testing.T) repository {
 	for name, data := range map[string]string{
 		"packages/backend/package.json": `{"dependencies":{"convex":"1.0.0"}}`,
 		"packages/backend/convex.json":  `{}`,
+		".gitignore":                    "**/.env.local\n",
 	} {
 		if err := os.WriteFile(filepath.Join(r.root, name), []byte(data), 0600); err != nil {
 			t.Fatal(err)
@@ -33,6 +34,9 @@ func backendOnlyFixture(t *testing.T) repository {
 
 func TestConvexOnlyInitDoesNotRequireAWebService(t *testing.T) {
 	r := backendOnlyFixture(t)
+	if err := os.WriteFile(filepath.Join(r.root, "packages/backend/.env.local"), []byte("DEPRECATED=\"unterminated\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	result, err := ProposeInit(t.Context(), r.client, r.root, InitOptions{Project: "dev-team:m0", Convex: true})
 	if err != nil {
 		t.Fatal(err)
