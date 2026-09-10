@@ -266,6 +266,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 		return g.Remove(ctx, step.Identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, RemoveBranch: step.NewBranch, ExpectedOID: step.Workspace.HeadOID, OwnedEdit: owned})
 	}()
 	if absent, absentErr := destroyedAbsence(step.Identity); absent && absentErr == nil {
+		if err != nil && step.NewBranch {
+			return DestroyResult{}, err // metadata cleanup errors cannot masquerade as a completed worktree response
+		}
 		journal, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		result, finishErr := finishDestroy(journal, s, g, w, step)
