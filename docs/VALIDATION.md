@@ -72,8 +72,9 @@ The production local-only lifecycle now commits `prepared` generation `1` after 
 
 ## M1 local-only CLI and destruction
 
-The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, source preservation, exact pruning of unchanged EVE-created branches, preservation of pre-existing target branches, occupied ports, cleanup pending and port-claim release.
+The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, source preservation, exact pruning of unchanged EVE-created branches, preservation of pre-existing or divergent target branches, occupied ports, cleanup pending and port-claim release.
 
+Command parsing now accepts the documented mixed argument order (`status branch --refresh`, flags before selectors, and equivalents) without disabling validation. Auth status/logout open the user registry without requiring an invoking Git checkout and expose profile metadata only, never token values. Bounded provider/`envfile` failures preserve codes, key/line details, exits and next actions.
 `TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, and verifies page JSON through a real `agent-browser` session. It destroys one remaining application while the other stays available. This is Linux frontend evidence, not cloud or macOS proof.
 
 ## M2 Convex lifecycle
@@ -90,7 +91,7 @@ Credential sign-out removes local secret/profile references only after matching 
 
 `eve resume` now resumes the original operation from durable UUID, revision, manifest, allocation, resource and journal intent. Separate-process tests resume after Git interruption and a test fake proves one deployment is reconciled after an ambiguous create instead of another being created. Prepared resume is idempotent; failed/unknown or dirty states remain diagnostic. Repeating `create` over a prepared branch is exact and mutation-free; `--from` conflicts and incomplete branches route to resume.
 
-Bounded `gc` is report-only by default. `gc --apply` verifies recorded worktree/admin absence before generating a new destroy intent, completes exact remote deletion/key purge and claim release, and refuses recreated paths.
+Bounded `gc` is report-only by default. `gc --apply` verifies the recorded worktree checkout is absent before generating a new destroy intent, completes exact remote deletion/key purge and claim release, and refuses recreated paths. A raw deleted checkout with retained Git admin metadata is reconciled by matching the admin directory's recorded filesystem identity and exact `gitdir` pointer, never by broad `git worktree prune`. Global `list --all`, `gc`, and credential metadata operations also run outside an invoking checkout.
 
 
 Additive key/extra-endpoint `sync` runs local and Git drift checks before any remote write, uploads only declared resource env keys, preserves every existing endpoint slot while appending probed capacities inside the block, publishes generation 2 with fresh fingerprints, and reports `restart_required`. Tests cover absent bytecode no-ops, unmanaged content, drift/overwrite, endpoint immutability, remote additive values, and destruction after sync.

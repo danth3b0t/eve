@@ -18,6 +18,7 @@ import (
 
 	"eve/internal/config"
 	"eve/internal/domain"
+	"eve/internal/envfile"
 	"eve/internal/git"
 	"eve/internal/lifecycle"
 	"eve/internal/platform"
@@ -134,7 +135,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				_, _ = fmt.Fprintf(stderr, "next: %s\n", response.Error.NextAction)
 			}
 			if response.Error.Code == "E_USAGE" {
-				_, _ = fmt.Fprintln(stderr, "usage: eve <create|path|status|destroy> [command options]")
+				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|path|status|doctor|sync|resume|destroy|gc|list|auth|init> [command options] [workspace]")
 			}
 		}
 		return code
@@ -197,6 +198,24 @@ func wantsJSON(args []string) bool {
 	}
 	return false
 }
+
+// parseCommandFlags supports the documented grammar in both orders: an
+// operation selector before command flags, or flags before the selector.
+func parseCommandFlags(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for len(args) != 0 {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
+	return positional, nil
+}
 func commandName(args []string) string {
 	if len(args) == 0 {
 		return "eve"
@@ -228,6 +247,26 @@ func storeFor(ctx context.Context, writable bool) (*git.Client, *state.Store, er
 	}
 	return g, s, nil
 }
+func globalStore(ctx context.Context, writable bool) (*git.Client, *state.Store, error) {
+	g, err := git.New()
+	if err != nil {
+		return nil, nil, err
+	}
+	root, err := platform.DefaultPaths()
+	if err != nil {
+		return nil, nil, err
+	}
+	var s *state.Store
+	if writable {
+		s, err = state.Open(ctx, root.State)
+	} else {
+		s, err = state.OpenReadOnly(ctx, root.State)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return g, s, nil
+}
 func loadConfig() (config.UserConfig, error) {
 	paths, err := platform.DefaultPaths()
 	if err != nil {
@@ -247,13 +286,14 @@ func create(ctx context.Context, args []string) (*output, error) {
 	fs, jsonOut := newFlags("create")
 	yes := fs.Bool("yes", false, "approve source registration, allocation and this workspace creation")
 	from := fs.String("from", "", "existing commit/ref for a new branch")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid create options"}
 	}
-	if fs.NArg() != 1 {
+	if len(positional) != 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "create requires one branch"}
 	}
-	branch := fs.Arg(0)
+	branch := positional[0]
 	registered := false
 	approved := *yes
 	reviewed := lifecycle.PlanPreview{}
@@ -380,10 +420,11 @@ func create(ctx context.Context, args []string) (*output, error) {
 func plan(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("plan")
 	from := fs.String("from", "", "existing commit/ref for a new branch")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid plan options"}
 	}
-	if fs.NArg() != 1 {
+	if len(positional) != 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "plan requires one branch"}
 	}
 	g, err := git.New()
@@ -394,7 +435,7 @@ func plan(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
 	}
-	preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, fs.Arg(0), *from)
+	preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, positional[0], *from)
 	if err != nil {
 		return nil, err
 	}
@@ -416,10 +457,11 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	write := fs.Bool("write", false, "create eve.toml after review flags")
 	yes := fs.Bool("yes", false, "approve creating this exact manifest")
 	project := fs.String("project", "", "explicit team:project binding when Convex is discovered")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid init options"}
 	}
-	if fs.NArg() != 0 {
+	if len(positional) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "init runs inside the source checkout"}
 	}
 	g, err := git.New()
@@ -545,18 +587,19 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	}
 	fs, _ := newFlags(command)
 	refresh := fs.Bool("refresh", false, "add read-only provider identity checks")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid " + command + " options"}
 	}
 	if *refresh && pathOnly {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "--refresh is valid only for status"}
 	}
-	if fs.NArg() > 1 {
+	if len(positional) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: command + " accepts at most one workspace"}
 	}
 	selector := ""
-	if fs.NArg() == 1 {
-		selector = fs.Arg(0)
+	if len(positional) == 1 {
+		selector = positional[0]
 	}
 	g, s, err := storeFor(ctx, *refresh)
 	if err != nil {
@@ -615,34 +658,44 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 func list(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("list")
 	all := fs.Bool("all", false, "list every registered repository")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid list options"}
 	}
-	if fs.NArg() != 0 {
+	if len(positional) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "list does not accept a workspace selector"}
 	}
-	g, s, err := storeFor(ctx, false)
+	var g *git.Client
+	var s *state.Store
+	var repos []state.Repository
+	if *all {
+		g, s, err = globalStore(ctx, false)
+	} else {
+		g, s, err = storeFor(ctx, false)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer s.Close()
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
-	}
-	checkout, err := g.Inspect(ctx, cwd)
-	if err != nil {
-		return nil, err
-	}
-	current, err := s.RepositoryForCommon(ctx, checkout.Identity.CommonDir, checkout.Identity.CommonIdentity)
-	if err != nil {
-		return nil, err
-	}
-	repos := []state.Repository{current}
 	if *all {
-		if repos, err = s.Repositories(ctx); err != nil {
+		repos, err = s.Repositories(ctx)
+		if err != nil {
 			return nil, err
 		}
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
+		}
+		checkout, err := g.Inspect(ctx, cwd)
+		if err != nil {
+			return nil, err
+		}
+		current, err := s.RepositoryForCommon(ctx, checkout.Identity.CommonDir, checkout.Identity.CommonIdentity)
+		if err != nil {
+			return nil, err
+		}
+		repos = []state.Repository{current}
 	}
 	response := &output{SchemaVersion: 1, Command: "list", OK: true}
 	var human strings.Builder
@@ -679,20 +732,14 @@ func list(ctx context.Context, args []string) (*output, error) {
 func gc(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("gc")
 	apply := fs.Bool("apply", false, "retry the exact eligible cleanup operations shown")
-	if err := fs.Parse(args); err != nil {
+	positional, parseErr := parseCommandFlags(fs, args)
+	if parseErr != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid gc options"}
 	}
-	if fs.NArg() != 0 {
+	if len(positional) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "gc does not accept a workspace selector"}
 	}
-	var s *state.Store
-	var err error
-	var g *git.Client
-	if *apply {
-		g, s, err = storeFor(ctx, true)
-	} else {
-		g, s, err = storeFor(ctx, false)
-	}
+	g, s, err := globalStore(ctx, *apply)
 	if err != nil {
 		return nil, err
 	}
@@ -784,15 +831,16 @@ func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now 
 func sync(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("sync")
 	overwrite := fs.Bool("overwrite-managed", false, "replace an externally edited EVE-managed value")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid sync options"}
 	}
-	if fs.NArg() > 1 {
+	if len(positional) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "sync accepts at most one workspace"}
 	}
 	selector := ""
-	if fs.NArg() == 1 {
-		selector = fs.Arg(0)
+	if len(positional) == 1 {
+		selector = positional[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -829,15 +877,16 @@ func sync(ctx context.Context, args []string) (*output, error) {
 func doctor(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("doctor")
 	remote := fs.Bool("remote", false, "add read-only provider identity checks")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid doctor options"}
 	}
-	if fs.NArg() > 1 {
+	if len(positional) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "doctor accepts at most one workspace"}
 	}
 	selector := ""
-	if fs.NArg() == 1 {
-		selector = fs.Arg(0)
+	if len(positional) == 1 {
+		selector = positional[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -895,15 +944,16 @@ func doctorHuman(result lifecycle.DoctorResult) string {
 }
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid resume options"}
 	}
-	if fs.NArg() > 1 {
+	if len(positional) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "resume accepts at most one workspace"}
 	}
 	selector := ""
-	if fs.NArg() == 1 {
-		selector = fs.Arg(0)
+	if len(positional) == 1 {
+		selector = positional[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -941,15 +991,16 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 	yes := fs.Bool("yes", false, "approve removal of the exact workspace")
 	discard := fs.Bool("discard-changes", false, "discard reviewed user work in the worktree")
 	assume := fs.Bool("assume-stopped", false, "assert the ordinary project launcher has been stopped/assessed")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid destroy options"}
 	}
-	if fs.NArg() > 1 {
+	if len(positional) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "destroy accepts at most one workspace"}
 	}
 	selector := ""
-	if fs.NArg() == 1 {
-		selector = fs.Arg(0)
+	if len(positional) == 1 {
+		selector = positional[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -1066,6 +1117,10 @@ func codeOf(err error) string {
 	if errors.As(err, &d) {
 		return d.Code
 	}
+	var envErr *envfile.Error
+	if errors.As(err, &envErr) {
+		return envErr.Code
+	}
 	return ""
 }
 func exitCode(err error) int {
@@ -1077,11 +1132,13 @@ func exitCode(err error) int {
 		return 4
 	case "E_PROVIDER_RESOURCE", "E_PROVIDER_SERVER", "E_PROVIDER_TRANSPORT", "E_PROVIDER_AMBIGUOUS", "E_PROVIDER_CONTRACT", "E_PROVIDER_THROTTLED", "E_PROVIDER_CONFLICT":
 		return 5
+	case "E_PROVIDER_NOT_FOUND":
+		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
-	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
+	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_GIT_REFERENCE_CHANGED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
 		return 3
-	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
+	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_ENV_KEY", "E_ENV_DUPLICATE", "E_ENV_VALUE", "E_ENV_SIZE", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2
 	default:
 		return 1
@@ -1097,6 +1154,10 @@ func errorResult(command string, err error) *output {
 	if errors.As(err, &d) && d.Message != "" {
 		message = d.Message
 	}
+	var envErr *envfile.Error
+	if errors.As(err, &envErr) && envErr.Reason != "" {
+		message = envErr.Reason
+	}
 	response := &output{SchemaVersion: 1, Command: command, OK: false, Error: &commandError{Code: code, Message: message, Details: map[string]any{}}}
 	if errors.As(err, &d) {
 		if d.Path != "" {
@@ -1106,6 +1167,14 @@ func errorResult(command string, err error) *output {
 			response.Error.Details["port"] = d.Port
 		}
 	}
+	if errors.As(err, &envErr) {
+		if envErr.Key != "" {
+			response.Error.Details["key"] = envErr.Key
+		}
+		if len(envErr.Lines) != 0 {
+			response.Error.Details["lines"] = envErr.Lines
+		}
+	}
 	switch code {
 	case "E_CLEANUP_PENDING":
 		response.Error.NextAction = "stop or assess the listener, then rerun the same destroy command"
@@ -1113,6 +1182,10 @@ func errorResult(command string, err error) *output {
 		response.Error.NextAction = "review the planned local effects and rerun with the listed safety flags"
 	case "E_RESUME_REQUIRED":
 		response.Error.NextAction = "run eve resume with the same branch or workspace ID"
+	case "E_PROVIDER_NOT_FOUND":
+		response.Error.NextAction = "run doctor --remote for this workspace, then rerun the exact recovery/destroy command"
+	case "E_GIT_REFERENCE_CHANGED":
+		response.Error.NextAction = "review the changed target branch, restore its recorded EVE intent or create a new tracked target"
 	case "E_WORKTREE_DIRTY":
 		response.Error.NextAction = "review changes or use --discard-changes to discard that work"
 	case "E_POSSIBLY_RUNNING":

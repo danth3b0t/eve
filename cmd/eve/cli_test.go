@@ -220,10 +220,10 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	code, stdout, _, status := command(t, binary, root, base, "status", "--json", "payments")
 	if code != 0 || !status.OK || status.Services["web"].Port == 0 || status.Workspace.State != "prepared" {
 		t.Fatalf("status: %d %s", code, stdout)
-		refreshCode, refreshOut, _, refresh := command(t, binary, root, base, "status", "--json", "--refresh", "payments")
-		if refreshCode != 0 || !refresh.OK || !strings.Contains(string(refreshOut), `"remote":[{"id":"provider_remote","status":"not_checked"`) {
-			t.Fatalf("status refresh: %d %s", refreshCode, refreshOut)
-		}
+	}
+	refreshCode, refreshOut, _, refresh := command(t, binary, root, base, "status", "--json", "payments", "--refresh")
+	if refreshCode != 0 || !refresh.OK || !strings.Contains(string(refreshOut), `"remote":[{"id":"provider_remote","status":"not_checked"`) {
+		t.Fatalf("status --refresh after selector: %d %s", refreshCode, refreshOut)
 	}
 	doctorCode, doctorOut, _, doctor := command(t, binary, root, base, "doctor", "--json", "payments")
 	if doctorCode != 0 || !doctor.OK || !strings.Contains(string(doctorOut), `"status":"pass"`) || !strings.Contains(string(doctorOut), `"status":"not_checked"`) {
@@ -250,7 +250,7 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("dirty destroy removed worktree")
 	}
-	code, stdout, _, destroyed := command(t, binary, root, base, "destroy", "--yes", "--discard-changes", "--json", path)
+	code, stdout, _, destroyed := command(t, binary, root, base, "destroy", path, "--yes", "--discard-changes", "--json")
 	if code != 0 || !destroyed.OK || destroyed.Workspace.State != "destroyed" {
 		t.Fatalf("destroy: %d %s", code, stdout)
 	}
@@ -258,7 +258,7 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 		t.Fatal("destroyed worktree remains")
 	}
 	if runGit(t, root, "branch", "--list", "payments") == "" {
-		t.Fatal("destroy removed the Git branch")
+		t.Fatal("destroy removed the advanced EVE-created branch")
 	}
 	code, _, _, _ = command(t, binary, root, base, "path", "payments")
 	if code != 3 {
@@ -270,6 +270,18 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	}
 	if out := runGit(t, root, "status", "--porcelain", "--untracked-files=all"); out != "" {
 		t.Fatalf("source changed after lifecycle: %s", out)
+	}
+	neutral := filepath.Join(base, "neutral")
+	if err := os.Mkdir(neutral, 0700); err != nil {
+		t.Fatal(err)
+	}
+	globalCode, globalOut, _, _ := command(t, binary, neutral, base, "list", "--json", "--all")
+	if globalCode != 0 || !strings.Contains(string(globalOut), `"workspaces":[]`) || !strings.Contains(string(globalOut), `"repositories"`) {
+		t.Fatalf("global list from outside Git: %d %s", globalCode, globalOut)
+	}
+	gcCode, gcOut, _, _ := command(t, binary, neutral, base, "gc")
+	if gcCode != 0 || !strings.Contains(string(gcOut), "no recorded cleanup candidates") {
+		t.Fatalf("global GC report from outside Git: %d %s", gcCode, gcOut)
 	}
 }
 
@@ -355,13 +367,18 @@ func TestGCCLIReportsBeforeExactApply(t *testing.T) {
 		t.Fatalf("create: %d %s", code, stdout)
 	}
 	path := created.Workspace.Path
-	runGit(t, root, "worktree", "remove", "--force", "--", path)
-	runGit(t, root, "worktree", "prune")
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
 	code, stdout, _, _ = command(t, binary, root, base, "gc", "--json")
 	if code != 0 || !strings.Contains(string(stdout), `"kind":"orphaned_worktree"`) || !strings.Contains(string(stdout), `"eligible":true`) || strings.Contains(string(stdout), `"applied":true`) {
 		t.Fatalf("gc report: %d %s", code, stdout)
 	}
-	code, stdout, _, _ = command(t, binary, root, base, "gc", "--apply", "--json")
+	neutral := filepath.Join(base, "neutral")
+	if err := os.Mkdir(neutral, 0700); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _, _ = command(t, binary, neutral, base, "gc", "--apply", "--json")
 	if code != 0 || !strings.Contains(string(stdout), `"applied":true`) || !strings.Contains(string(stdout), `"state":"destroyed"`) {
 		t.Fatalf("gc apply: %d %s", code, stdout)
 	}

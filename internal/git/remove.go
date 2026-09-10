@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"eve/internal/domain"
+	"eve/internal/platform"
 	"strings"
 )
 
@@ -106,7 +107,8 @@ func (c *Client) CheckRemoval(ctx context.Context, id domain.GitIdentity, branch
 
 // Remove must be called only for a recorded owned identity after destruction
 // intent/consent and any remote cleanup. Safety is checked again immediately
-// before Git removal. No branch is deleted; no worktree is forcibly unlocked.
+// before Git removal. An exact unchanged EVE-created branch can be deleted by
+// explicit option; pre-existing or divergent branches are preserved. No worktree is forcibly unlocked.
 func (c *Client) Remove(ctx context.Context, id domain.GitIdentity, branch, reference, scratch string, options RemovalOptions) error {
 	check, err := c.CheckRemoval(ctx, id, branch, reference, options)
 	if err != nil {
@@ -161,7 +163,10 @@ func (c *Client) RemoveBranch(ctx context.Context, id domain.GitIdentity, branch
 		return err
 	}
 	if !exists || current != expectedOID {
-		return problem("E_GIT_REFERENCE_CHANGED", "workspace branch tip changed or is absent; review it before deletion", branch)
+		// A changed branch may contain developer work after worktree publication.
+		// Keep it; absence means matching metadata already disappeared. Either
+		// state is completed cleanup, never retarget/deletion authorization.
+		return nil
 	}
 	if err := c.mutate(ctx, id.CommonDir, scratch, "branch", "-D", "--", branch); err != nil {
 		return err
@@ -172,6 +177,47 @@ func (c *Client) RemoveBranch(ctx context.Context, id domain.GitIdentity, branch
 	}
 	if exists {
 		return problem("E_CLEANUP_PENDING", "workspace branch removal could not be confirmed", branch)
+	}
+	return nil
+}
+
+// RemoveAdmin removes only a retained Git administrative directory whose
+// worktree pointer and recorded filesystem identity agree that the missing
+// checkout was EVE's exact workspace. It never runs a broad Git prune.
+func (c *Client) RemoveAdmin(ctx context.Context, id domain.GitIdentity) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(id.Path); !os.IsNotExist(err) {
+		return problem("E_GIT_RECONCILE", "recorded worktree path exists again; refusing metadata cleanup", id.Path)
+	}
+	if filepath.Dir(id.AdminDir) != filepath.Join(id.CommonDir, "worktrees") {
+		return problem("E_GIT_OWNERSHIP", "retained Git metadata is outside this repository's worktrees directory", id.AdminDir)
+	}
+	_, identity, err := platform.DirectoryIdentity(id.AdminDir)
+	if err != nil || identity != id.AdminIdentity {
+		return problem("E_GIT_IDENTITY", "retained Git metadata moved or changed identity", id.AdminDir)
+	}
+	root, err := os.OpenRoot(id.AdminDir)
+	if err != nil {
+		return problem("E_GIT_IDENTITY", "retained Git metadata cannot be pinned safely", id.AdminDir)
+	}
+	pointer, readErr := root.ReadFile("gitdir")
+	closeErr := root.Close()
+	if readErr != nil {
+		return problem("E_GIT_IDENTITY", "retained worktree pointer is unreadable", id.AdminDir)
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if strings.TrimSpace(string(pointer)) != filepath.Join(id.Path, ".git") {
+		return problem("E_GIT_IDENTITY", "retained worktree pointer no longer matches durable identity", id.AdminDir)
+	}
+	if err := os.RemoveAll(id.AdminDir); err != nil {
+		return problem("E_CLEANUP_PENDING", "retained Git administrative metadata could not be removed", id.AdminDir)
+	}
+	if _, err := os.Lstat(id.AdminDir); !os.IsNotExist(err) {
+		return problem("E_CLEANUP_PENDING", "retained Git administrative metadata removal could not be confirmed", id.AdminDir)
 	}
 	return nil
 }
