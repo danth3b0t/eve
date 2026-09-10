@@ -1110,9 +1110,9 @@ func errorResult(command string, err error) *output {
 	case "E_CLEANUP_PENDING":
 		response.Error.NextAction = "stop or assess the listener, then rerun the same destroy command"
 	case "E_APPROVAL_REQUIRED":
+		response.Error.NextAction = "review the planned local effects and rerun with the listed safety flags"
 	case "E_RESUME_REQUIRED":
 		response.Error.NextAction = "run eve resume with the same branch or workspace ID"
-		response.Error.NextAction = "review the planned local effects and rerun with the listed safety flags"
 	case "E_WORKTREE_DIRTY":
 		response.Error.NextAction = "review changes or use --discard-changes to discard that work"
 	case "E_POSSIBLY_RUNNING":
