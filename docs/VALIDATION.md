@@ -80,7 +80,7 @@ The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspace
 
 Production `eve` now provisions and destroys exact nondefault Convex dev deployments. An 80.74-second Linux run created two workspaces and two independent five-day deployments, pushed fixture code through the ordinary Convex CLI, verified each backend's configured `SITE_URL`, destroyed the first while the second kept running, then deleted the second and verified that no `dev/eve/` deployment remained. Original project/default identities were preserved. Earlier failed runs left four deployment names; each exact nondefault test-owned resource was verified and deleted.
 
-Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS/regional/browser/TTL-elapsed gates remain open.
+A 96.91-second `aws-eu-west-1` production run also passed and left no resources. Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS/browser/TTL-elapsed gates remain open.
 
 ## M3 initial resume
 

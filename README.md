@@ -6,7 +6,7 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 ## Status
 
-M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
+M0's Linux Bun/Turbo/Convex live evidence passes, including inherited defaults, native launch, keys/expiry and exact cleanup. A production-CLI live test now passes in the default region and `aws-eu-west-1`; macOS and arm64 runtime acceptance remain open.
 
 The guarded CLI now supports `create`, `path`, `status`, `resume`, additive `sync`, `list`, bounded `gc`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. Broader topology sync, discovery/onboarding UX and M4–M5 remain pending.
 

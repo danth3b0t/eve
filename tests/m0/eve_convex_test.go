@@ -92,6 +92,11 @@ func TestLiveCLICConvexLifecycle(t *testing.T) {
 	if data, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("CLI build: %v %s", err, data)
 	}
+	region := os.Getenv("EVE_M0_REGION")
+	regionDeclaration := ""
+	if region != "" {
+		regionDeclaration = "region = '" + region + "'\n"
+	}
 	manifest := fmt.Sprintf(`version = 1
 [workspace]
 port_block_size = 4
@@ -99,6 +104,7 @@ port_block_size = 4
 provider = 'convex'
 path = 'packages/backend'
 project = '%s'
+%s
 [resources.backend.env]
 SITE_URL = '${services.web.url}'
 [services.web]
@@ -115,7 +121,7 @@ port = 'PORT'
 [services.admin.env]
 VITE_CONVEX_URL = '${resources.backend.url}'
 VITE_CONVEX_SITE_URL = '${resources.backend.site_url}'
-`, projectBinding)
+`, projectBinding, regionDeclaration)
 	f.write(t, "eve.toml", manifest)
 	f.run(t, "git", "add", "eve.toml")
 	f.run(t, "git", "commit", "-m", "Declare production cloud contracts")
