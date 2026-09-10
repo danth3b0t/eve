@@ -171,7 +171,7 @@ func TestSyncUpdatesDeclaredRemoteValuesWhilePreservingResourceIdentity(t *testi
 		t.Fatal(err)
 	}
 	managed := make(chan map[string]string, 2)
-	factory := fakeConvexFactory(t, managed, false, nil)
+	factory := fakeConvexFactory(t, managed, false, nil, nil)
 	bindings, err := provisionResources(t.Context(), r.store, lock, current, factory)
 	if err != nil {
 		t.Fatal(err)

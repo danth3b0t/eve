@@ -62,7 +62,7 @@ func TestGCDeletesExactRemoteResourceAfterManualWorktreeLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	factory := fakeConvexFactory(t, make(chan map[string]string, 1), false, nil)
+	factory := fakeConvexFactory(t, make(chan map[string]string, 1), false, nil, nil)
 	bindings, err := provisionResources(t.Context(), r.store, lock, current, factory)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestGCDeletesExactRemoteResourceAfterManualWorktreeLoss(t *testing.T) {
 	}
 }
 
-func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bool, attempts *int) convexFactory {
+func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bool, attempts *int, failDelete *bool) convexFactory {
 	t.Helper()
 	var keyName string
 	var expiresAt int64
@@ -159,6 +159,9 @@ func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bo
 				}
 				return body(200, fmt.Sprintf(`{"id":123,"name":"calm-cow-456","projectId":42,"kind":"cloud","deploymentType":"dev","isDefault":false,"reference":%q,"deploymentUrl":"https://calm-cow-456.eu-west-1.convex.cloud","createTime":%d,"expiresAt":%d}`, created.Reference, created.ExpiresAt-5*24*60*60*1000, created.ExpiresAt)), nil
 			case "POST api.convex.dev/v1/deployments/calm-cow-456/delete":
+				if failDelete != nil && *failDelete {
+					return body(403, "forbidden"), nil
+				}
 				if deleted {
 					t.Fatal("deployment deleted twice")
 				}
@@ -206,7 +209,7 @@ func TestConvexAmbiguousCreateReconcilesExactReference(t *testing.T) {
 	}
 	managed := make(chan map[string]string, 1)
 	posts := 0
-	factory := fakeConvexFactory(t, managed, true, &posts)
+	factory := fakeConvexFactory(t, managed, true, &posts, nil)
 	_, err = provisionResources(t.Context(), r.store, lock, current, factory)
 	errorCode(t, err, "E_PROVIDER_AMBIGUOUS")
 	resources, err := lock.Resources(t.Context())
@@ -245,7 +248,7 @@ func TestConvexProvisioningStagesAndPublishesExactBindings(t *testing.T) {
 		t.Fatal("resource intent missing")
 	}
 	managed := make(chan map[string]string, 1)
-	factory := fakeConvexFactory(t, managed, false, nil)
+	factory := fakeConvexFactory(t, managed, false, nil, nil)
 	bindings, err := provisionResources(t.Context(), r.store, lock, current, factory)
 	if err != nil {
 		t.Fatal(err)

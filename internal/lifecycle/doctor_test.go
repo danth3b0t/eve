@@ -63,7 +63,7 @@ func TestDoctorRemoteUsesOnlyIdentityChecks(t *testing.T) {
 	if _, err := PrepareGit(t.Context(), r.store, r.client, lock); err != nil {
 		t.Fatal(err)
 	}
-	factory := fakeConvexFactory(t, make(chan map[string]string, 1), false, nil)
+	factory := fakeConvexFactory(t, make(chan map[string]string, 1), false, nil, nil)
 	bindings, err := provisionResources(t.Context(), r.store, lock, current, factory)
 	if err != nil {
 		t.Fatal(err)

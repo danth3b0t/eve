@@ -55,7 +55,7 @@ func TestResumeReconcilesUnknownConvexDeploymentAndCompletesCreate(t *testing.T)
 	}
 	managed := make(chan map[string]string, 1)
 	posts := 0
-	factory := fakeConvexFactory(t, managed, true, &posts)
+	factory := fakeConvexFactory(t, managed, true, &posts, nil)
 	_, err = provisionResources(t.Context(), r.store, lock, current, factory)
 	errorCode(t, err, "E_PROVIDER_AMBIGUOUS")
 	if err := lock.Close(); err != nil {
