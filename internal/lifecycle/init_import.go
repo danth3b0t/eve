@@ -212,6 +212,13 @@ func mergeInitManifest(existing *config.Manifest, services []InitService, backen
 			if current.Path != service.Path {
 				return nil, proposalProblem("E_INIT_UPDATE", "existing service has a different path for its identifier")
 			}
+			if service.Port == "" {
+				current.Port = ""
+			} else if current.Port != "" && current.Port != service.Port {
+				return nil, proposalProblem("E_INIT_UPDATE", "existing native port selector changed; review the manifest manually")
+			} else {
+				current.Port = service.Port
+			}
 			if current.Env == nil {
 				current.Env = map[string]string{}
 			}

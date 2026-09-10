@@ -161,3 +161,27 @@ project = "dev-team:m0"
 		t.Fatal("old deployment value retained in update")
 	}
 }
+
+func TestUpdateDoesNotPreserveUnprovenPortClaim(t *testing.T) {
+	existing, err := config.Parse([]byte(`version = 1
+
+[services.web]
+path = "apps/web"
+env_file = ".env.local"
+port = "PORT"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := mergeInitManifest(existing, []InitService{{ID: "web", Path: "apps/web"}}, "", InitOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Services["web"].Port != "" {
+		t.Fatal("update preserved an unsupported native PORT claim")
+	}
+	_, err = mergeInitManifest(existing, []InitService{{ID: "web", Path: "apps/web", Port: "HTTP_PORT"}}, "", InitOptions{})
+	if err == nil {
+		t.Fatal("native selector migration was silently inferred")
+	}
+}
