@@ -6,9 +6,9 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 ## Status
 
-M0's Linux Bun/Turbo/Convex live evidence passes, including inherited defaults, native launch, keys/expiry and exact cleanup. A production-CLI live test now passes in the default region and `aws-eu-west-1`; macOS and arm64 runtime acceptance remain open.
+Linux evidence now covers unchanged Bun/Turbo/Vite/Convex start/stop lifecycles, inherited defaults, finite expiry/cleanup, a 31-minute elapsed TTL, default and `aws-eu-west-1` backends, and real browser-rendered EVE configuration. Physical macOS/Apple ARM runtime remains the separate release gate; QEMU Linux/arm64 smoke evidence exists but is emulated.
 
-The guarded CLI now supports `create`, `path`, `status`, `resume`, additive `sync`, `list`, bounded `gc`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. Broader topology sync, discovery/onboarding UX and M4–M5 remain pending.
+The guarded CLI supports `init`, `plan`, `create`, `path`, `status --refresh`, `resume`, additive and extra-endpoint `sync`, `list`, `doctor --remote`, bounded `gc`, `destroy`, and Convex credential login/logout. Interactive creation prompts for typed `yes` on a TTY while JSON remains non-interactive.
 
 Interactive creation shows a preview and asks for typed `yes`; automation uses flags/JSON without prompting:
 

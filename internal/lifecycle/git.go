@@ -142,7 +142,7 @@ func outsideState(s *state.Store, checkout git.Checkout) error {
 //
 // Re-invocation reconciles an exact completed creation receipt or a recorded
 // identity. Incomplete Git initialization without such evidence is a diagnostic,
-// not a blind retry/reset/adoption. Full resume/destroy orchestration is pending.
+// not a blind retry/reset/adoption; resume continues it explicitly.
 func PrepareGit(ctx context.Context, s *state.Store, g *git.Client, locked *state.LockedWorkspace) (domain.GitIdentity, error) {
 	step, err := locked.GitStep(ctx)
 	if err != nil {
