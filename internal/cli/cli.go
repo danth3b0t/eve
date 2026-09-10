@@ -430,7 +430,11 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current checkout is inaccessible"}
 	}
-	result, err := lifecycle.ProposeInit(ctx, g, cwd, lifecycle.InitOptions{Project: *project})
+	checkout, err := g.Inspect(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	result, err := lifecycle.ProposeInit(ctx, g, checkout.Identity.Path, lifecycle.InitOptions{Project: *project})
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +450,7 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 		if _, err := config.Parse(result.Manifest); err != nil {
 			return nil, err
 		}
-		if err := writeInitManifest(cwd, result.Manifest); err != nil {
+		if err := writeInitManifest(checkout.Identity.Path, result.Manifest); err != nil {
 			return nil, err
 		}
 		written = true

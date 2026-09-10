@@ -47,31 +47,26 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 		return InitResult{}, proposalProblem("E_INIT_EXISTS", "eve.toml already exists at the target revision")
 	}
 	result := InitResult{Evidence: []string{"Committed filesystem/JSON/package patterns only; commands are not evaluated."}}
-	publicKeys := map[string]bool{}
-	for name, entry := range tree {
-		if entry.Mode != "100644" || strings.HasPrefix(name, ".") || strings.Contains(name, "/node_modules/") || strings.HasPrefix(name, "node_modules/") {
-			continue
-		}
-		data, err := g.Blob(ctx, checkout.Identity.Path, entry, 1<<20)
-		if err == nil {
-			if strings.Contains(string(data), "VITE_CONVEX_URL") {
-				publicKeys["VITE_CONVEX_URL"] = true
-			}
-			if strings.Contains(string(data), "VITE_CONVEX_SITE_URL") {
-				publicKeys["VITE_CONVEX_SITE_URL"] = true
-			}
-		}
-	}
 	services := exploreVitePackages(ctx, g, checkout, tree, &result)
 	if len(services) == 0 {
 		result.Warnings = append(result.Warnings, "No strictly supported Bun/Vite package layout was identified.")
 		return result, proposalProblem("E_INIT_DISCOVERY", "no exact supported service layout was identified; write eve.toml manually")
 	}
 	result.Services = services
-	backend := findConvexBackend(tree)
+	backends, err := findConvexBackends(ctx, g, checkout, tree)
+	if err != nil {
+		return result, err
+	}
+	if len(backends) > 1 {
+		return result, proposalProblem("E_INIT_AMBIGUOUS", "multiple Convex backend candidates require explicit manual configuration: "+strings.Join(backends, ", "))
+	}
+	backend := ""
+	if len(backends) == 1 {
+		backend = backends[0]
+	}
 	result.HasConvexBackend = backend != ""
 	if backend != "" {
-		result.Evidence = append(result.Evidence, "Convex package "+backend+" with convex in package.json and convex.json")
+		result.Evidence = append(result.Evidence, "Convex package "+backend+" has convex.json and a convex dependency in package.json")
 		if err := validateInitProject(options.Project); err != nil {
 			return result, err
 		}
@@ -79,16 +74,18 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 		return result, proposalProblem("E_PROVIDER_INTENT", "--project was supplied but no exact Convex backend pattern was identified")
 	}
 	for i := range services {
-		if publicKeys["VITE_CONVEX_URL"] {
-			services[i].PublicURL = true
+		public, err := scanServicePublicKeys(ctx, g, checkout, tree, services[i].Path)
+		if err != nil {
+			return result, err
 		}
-		if publicKeys["VITE_CONVEX_SITE_URL"] {
-			services[i].PublicSiteURL = true
-		}
+		services[i].PublicURL = public["VITE_CONVEX_URL"]
+		services[i].PublicSiteURL = public["VITE_CONVEX_SITE_URL"]
 	}
-	result.Manifest = renderInitManifest(services, backend, options.Project, result.Warnings)
+	result.Manifest = renderInitManifest(services, backend, options.Project)
 	if backend == "" {
 		result.Warnings = append(result.Warnings, "No exact Convex backend discovered; generated manifest is LOCAL-ONLY.")
+	} else {
+		result.Warnings = append(result.Warnings, "SITE_URL is intentionally unresolved; map it to a reviewed service manually if the backend requires it.")
 	}
 	return result, nil
 }
@@ -151,13 +148,57 @@ func vitePrefixes(tree map[string]git.TreeEntry) map[string]bool {
 	}
 	return set
 }
-func findConvexBackend(tree map[string]git.TreeEntry) string {
-	for name, entry := range tree {
-		if entry.Mode == "100644" && path.Base(name) == "convex.json" && !strings.Contains(name, "node_modules/") {
-			return path.Dir(name)
+func findConvexBackends(ctx context.Context, g *git.Client, checkout git.Checkout, tree map[string]git.TreeEntry) ([]string, error) {
+	var candidates []string
+	for _, name := range slices.Sorted(maps.Keys(tree)) {
+		entry := tree[name]
+		if entry.Mode != "100644" || path.Base(name) != "convex.json" || strings.Contains(name, "node_modules/") {
+			continue
 		}
+		base := path.Dir(name)
+		packageEntry, ok := tree[path.Join(base, "package.json")]
+		if !ok {
+			continue
+		}
+		data, err := g.Blob(ctx, checkout.Identity.Path, packageEntry, 1<<20)
+		if err != nil {
+			return nil, err
+		}
+		var metadata struct {
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
+		}
+		if json.Unmarshal(data, &metadata) != nil || (metadata.Dependencies["convex"] == "" && metadata.DevDependencies["convex"] == "") {
+			continue
+		}
+		candidates = append(candidates, base)
 	}
-	return ""
+	return candidates, nil
+}
+
+func scanServicePublicKeys(ctx context.Context, g *git.Client, checkout git.Checkout, tree map[string]git.TreeEntry, base string) (map[string]bool, error) {
+	found := map[string]bool{}
+	prefix := ""
+	if base != "." {
+		prefix = base + "/"
+	}
+	source := map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".vue": true, ".svelte": true, ".html": true}
+	for _, name := range slices.Sorted(maps.Keys(tree)) {
+		if prefix != "" && !strings.HasPrefix(name, prefix) || strings.Contains(name, "/node_modules/") {
+			continue
+		}
+		if !source[path.Ext(name)] || tree[name].Mode != "100644" {
+			continue
+		}
+		data, err := g.Blob(ctx, checkout.Identity.Path, tree[name], 1<<20)
+		if err != nil {
+			return nil, err
+		}
+		text := string(data)
+		found["VITE_CONVEX_URL"] = found["VITE_CONVEX_URL"] || strings.Contains(text, "VITE_CONVEX_URL")
+		found["VITE_CONVEX_SITE_URL"] = found["VITE_CONVEX_SITE_URL"] || strings.Contains(text, "VITE_CONVEX_SITE_URL")
+	}
+	return found, nil
 }
 func serviceID(base string) string {
 	if base == "." {
@@ -188,17 +229,13 @@ func validateInitProject(project string) error {
 	}
 	return nil
 }
-func renderInitManifest(services []InitService, backend, project string, warnings []string) []byte {
+func renderInitManifest(services []InitService, backend, project string) []byte {
 	var out strings.Builder
 	out.WriteString("# Review before use: listener/resource ownership is not inferred.\nversion = 1\n")
 	if backend != "" {
 		out.WriteString("\n[resources.backend]\nprovider = \"convex\"\npath = " + tomlString(backend) + "\nproject = " + tomlString(project) + "\n")
 	}
-	var first string
 	for _, service := range services {
-		if first == "" {
-			first = service.ID
-		}
 		out.WriteString("\n[services." + service.ID + "]\npath = " + tomlString(service.Path) + "\nenv_file = \".env.local\"\nport = \"PORT\"\n")
 		if backend != "" && (service.PublicURL || service.PublicSiteURL) {
 			out.WriteString("\n[services." + service.ID + ".env]\n")
@@ -209,11 +246,6 @@ func renderInitManifest(services []InitService, backend, project string, warning
 				out.WriteString("VITE_CONVEX_SITE_URL = \"${resources.backend.site_url}\"\n")
 			}
 		}
-	}
-	if backend != "" && first != "" {
-		out.WriteString("\n[resources.backend.env]\nSITE_URL = \"${services." + first + ".url}\"\n")
-	} else if backend != "" {
-		warnings = append(warnings, "No web service selected for SITE_URL")
 	}
 	return []byte(out.String())
 }
