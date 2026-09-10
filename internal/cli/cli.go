@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"eve/internal/config"
 	"eve/internal/domain"
@@ -33,6 +34,7 @@ type output struct {
 	Verification  *verification       `json:"verification,omitempty"`
 	Existing      bool                `json:"existing,omitempty"`
 	Repositories  []repositoryGroup   `json:"repositories,omitempty"`
+	GC            []gcCandidate       `json:"gc_candidates,omitempty"`
 	Auth          map[string]string   `json:"auth,omitempty"`
 	Warnings      []string            `json:"warnings,omitempty"`
 	Error         *commandError       `json:"error,omitempty"`
@@ -67,6 +69,13 @@ type listedWorkspace struct {
 	Workspace workspace           `json:"workspace"`
 	Services  map[string]service  `json:"services,omitempty"`
 	Resources map[string]resource `json:"resources,omitempty"`
+}
+type gcCandidate struct {
+	Kind      string    `json:"kind"`
+	Eligible  bool      `json:"eligible"`
+	Reason    string    `json:"reason"`
+	Workspace workspace `json:"workspace"`
+	Applied   bool      `json:"applied,omitempty"`
 }
 type verification struct {
 	Configuration string `json:"configuration"`
@@ -126,6 +135,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return resume(ctx, args[1:])
 	case "list":
 		return list(ctx, args[1:])
+	case "gc":
+		return gc(ctx, args[1:])
 	case "destroy":
 		return destroy(ctx, args[1:])
 	default:
@@ -428,6 +439,111 @@ func list(ctx context.Context, args []string) (*output, error) {
 	}
 	response.Human = human.String()
 	return response, nil
+}
+func gc(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("gc")
+	apply := fs.Bool("apply", false, "retry the exact eligible cleanup operations shown")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid gc options"}
+	}
+	if fs.NArg() != 0 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "gc does not accept a workspace selector"}
+	}
+	var s *state.Store
+	var err error
+	var g *git.Client
+	if *apply {
+		g, s, err = storeFor(ctx, true)
+	} else {
+		g, s, err = storeFor(ctx, false)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	repositories, err := s.Repositories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	response := &output{SchemaVersion: 1, Command: "gc", OK: true}
+	var human strings.Builder
+	now := time.Now().UnixMilli()
+	for _, repo := range repositories {
+		workspaces, err := s.ListWorkspaces(ctx, repo.ID, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, w := range workspaces {
+			candidate, include, err := gcCandidateFor(ctx, s, w, now)
+			if err != nil {
+				return nil, err
+			}
+			if !include {
+				continue
+			}
+			if *apply && candidate.Eligible {
+				result, err := lifecycle.ApplyGC(ctx, s, g, w.ID, lifecycle.GCOptions{})
+				if err != nil {
+					return nil, err
+				}
+				candidate.Applied = true
+				candidate.Workspace = workspace{ID: result.Workspace.ID, Branch: result.Workspace.Branch, Path: result.Workspace.Path, State: result.Workspace.State, Phase: result.Workspace.Phase, Generation: result.Workspace.Generation}
+			}
+			response.GC = append(response.GC, candidate)
+			fmt.Fprintf(&human, "%s %s eligible=%t path=%s\n", candidate.Kind, candidate.Reason, candidate.Eligible, quote(candidate.Workspace.Path))
+		}
+	}
+	if len(response.GC) == 0 {
+		human.WriteString("no recorded cleanup candidates\n")
+	}
+	response.Human = human.String()
+	return response, nil
+}
+func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now int64) (gcCandidate, bool, error) {
+	candidate := gcCandidate{Workspace: workspace{ID: w.ID, Branch: w.Branch, Path: w.Path, State: w.State, Phase: w.Phase, Generation: w.Generation}}
+	resources, err := s.Resources(ctx, w.ID)
+	if err != nil {
+		return candidate, false, err
+	}
+	for _, resource := range resources {
+		if resource.ExpiresAtMS > 0 && resource.ExpiresAtMS <= now && resource.State != "deleted" {
+			candidate.Kind = "expired_resource"
+			candidate.Reason = "deployment expired; local worktree is preserved and no automatic deletion follows"
+			return candidate, true, nil
+		}
+		if resource.State == "unknown" || resource.State == "cleanup_pending" || resource.State == "deleting" {
+			candidate.Kind = "remote_cleanup_pending"
+			candidate.Reason = "recorded remote operation must be reconciled, not replaced"
+			if w.State == "destroying" || w.State == "cleanup_pending" {
+				candidate.Eligible = true
+			}
+			return candidate, true, nil
+		}
+	}
+	switch w.State {
+	case "destroying", "cleanup_pending":
+		candidate.Kind = "cleanup_pending"
+		candidate.Reason = "exact local/remote cleanup can be retried"
+		candidate.Eligible = true
+		return candidate, true, nil
+	case "creating", "failed":
+		candidate.Kind = "unfinished_create"
+		candidate.Reason = "resume the operation or review its durable intent"
+		return candidate, true, nil
+	case "prepared":
+		if _, err := os.Lstat(w.Path); err == nil {
+			return candidate, false, nil
+		} else if errors.Is(err, os.ErrNotExist) {
+			candidate.Kind = "orphaned_worktree"
+			candidate.Reason = "recorded workspace path is absent; exact remote/local cleanup can be completed"
+			candidate.Eligible = true
+			return candidate, true, nil
+		}
+		candidate.Kind = "unverifiable_workspace"
+		candidate.Reason = "path is inaccessible; absence is not proven"
+		return candidate, true, nil
+	}
+	return candidate, false, nil
 }
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")

@@ -50,6 +50,47 @@ func resourceFixture(t *testing.T) (repository, GitPlan) {
 	return r, plan
 }
 
+func TestGCDeletesExactRemoteResourceAfterManualWorktreeLoss(t *testing.T) {
+	r, plan := resourceFixture(t)
+	t.Setenv("EVE_CONVEX_TOKEN", "auth-holder-sentinel")
+	lock := approved(t, r, plan)
+	identity, err := PrepareGit(t.Context(), r.store, r.client, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := r.store.Workspace(t.Context(), plan.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := fakeConvexFactory(t, make(chan map[string]string, 1), false, nil)
+	bindings, err := provisionResources(t.Context(), r.store, lock, current, factory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StageFilesWithBindings(t.Context(), r.store, r.client, lock, plan.Files, &bindings); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishFiles(t.Context(), r.store, r.client, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	command(t, r.root, "worktree", "remove", "--force", "--", identity.Path)
+	command(t, r.root, "worktree", "prune")
+	result, err := ApplyGC(t.Context(), r.store, r.client, plan.WorkspaceID, GCOptions{ProviderFactory: factory})
+	if err != nil || result.Workspace.State != "destroyed" {
+		t.Fatalf("GC remote cleanup: %v", err)
+	}
+	resources, err := r.store.Resources(t.Context(), plan.WorkspaceID)
+	if err != nil || resources[0].State != "deleted" {
+		t.Fatal("remote resource not deleted")
+	}
+	if _, err := os.Lstat(filepath.Join(r.base, "state", "secrets", resources[0].CredentialID)); !os.IsNotExist(err) {
+		t.Fatal("deploy credential retained")
+	}
+}
+
 func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bool, attempts *int) convexFactory {
 	t.Helper()
 	var keyName string

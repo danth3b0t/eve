@@ -267,3 +267,32 @@ func TestResumeCLICompletesInterruptedCreate(t *testing.T) {
 		t.Fatalf("idempotent resumed failed: %d %s", code, stdout)
 	}
 }
+
+func TestGCCLIReportsBeforeExactApply(t *testing.T) {
+	base, root := fixture(t)
+	binary := filepath.Join(base, "eve")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Dir = "."
+	if data, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, data)
+	}
+	code, stdout, _, created := command(t, binary, root, base, "create", "--yes", "--json", "orphan")
+	if code != 0 || !created.OK {
+		t.Fatalf("create: %d %s", code, stdout)
+	}
+	path := created.Workspace.Path
+	runGit(t, root, "worktree", "remove", "--force", "--", path)
+	runGit(t, root, "worktree", "prune")
+	code, stdout, _, _ = command(t, binary, root, base, "gc", "--json")
+	if code != 0 || !strings.Contains(string(stdout), `"kind":"orphaned_worktree"`) || !strings.Contains(string(stdout), `"eligible":true`) || strings.Contains(string(stdout), `"applied":true`) {
+		t.Fatalf("gc report: %d %s", code, stdout)
+	}
+	code, stdout, _, _ = command(t, binary, root, base, "gc", "--apply", "--json")
+	if code != 0 || !strings.Contains(string(stdout), `"applied":true`) || !strings.Contains(string(stdout), `"state":"destroyed"`) {
+		t.Fatalf("gc apply: %d %s", code, stdout)
+	}
+	code, stdout, _, _ = command(t, binary, root, base, "gc", "--json")
+	if code != 0 || strings.Contains(string(stdout), path) || strings.Contains(string(stdout), `gc_candidates`) {
+		t.Fatalf("gc retained candidate: %d %s", code, stdout)
+	}
+}
