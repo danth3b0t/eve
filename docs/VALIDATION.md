@@ -60,7 +60,7 @@ Linux tests, native/race checks, repeated file/lifecycle tests and CGo-disabled 
 
 ## M1 protected image staging
 
-The staging lifecycle now records opaque image references and keyed fingerprints before sensitive writes, verifies synced private objects, and checkpoints staging without publishing application files or completing a generation. Machine-key initialization is serialized; missing/partial/changed keys are never silently regenerated.
+The staging lifecycle now records opaque image references and keyed fingerprints before sensitive writes, verifies synced private objects, and checkpoints staging without publishing application files or completing a generation. Machine-key initialization is serialized; a demonstrably uncompleted bootstrap with no dependent HMAC can be repaired, but any established/dependent machine key is never regenerated.
 
 Real Git/SQLite tests kill a subprocess after partial or complete image sets but before SQL acknowledgment. Complete sets reconcile from their original objects; incomplete sets remain unresolved. Tests also cover corruption with restored timestamps, key initialization concurrency, private permissions/link/type checks, bounded reads and value-free metadata/formatting. These staging tests alone do not establish publication, drift-aware sync, snapshot cleanup or power-loss recovery.
 

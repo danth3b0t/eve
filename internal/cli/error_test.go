@@ -41,7 +41,7 @@ func TestSafeEnvfileErrorsRetainClassificationAndDetails(t *testing.T) {
 func TestMissingProviderObjectGetsExplicitClosedWorldRouting(t *testing.T) {
 	err := &domain.Error{Code: "E_PROVIDER_NOT_FOUND", Message: "recorded deployment no longer exists"}
 	got := errorResult("resume", err)
-	if exitCode(err) != 5 || !strings.Contains(got.Error.NextAction, "doctor --remote") {
+	if exitCode(err) != 7 || !strings.Contains(got.Error.NextAction, "doctor --remote") {
 		t.Fatalf("missing provider object routing: %#v exit=%d", got.Error, exitCode(err))
 	}
 }

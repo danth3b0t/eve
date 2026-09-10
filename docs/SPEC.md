@@ -3,6 +3,7 @@
 **Version:** 0.1 · **Status:** proposed implementation contract  
 **Scope:** standalone CLI, Git worktrees, native environment files, Convex cloud  
 **Target systems:** Linux and macOS, amd64 and arm64  
+**Supported release scope today:** Linux/amd64 only; Linux arm64 and macOS artifacts are preview builds until physical-host validation passes
 **Evidence reviewed:** September 9, 2026
 
 > EVE provisions a disposable, connected development worktree and writes ordinary configuration. The project then runs without EVE, or an EVE-specific launcher.
