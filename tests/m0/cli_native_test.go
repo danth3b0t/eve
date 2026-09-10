@@ -35,6 +35,11 @@ type eveResult struct {
 		SiteURL   string `json:"site_url"`
 		ExpiresAt string `json:"expires_at"`
 	} `json:"resources"`
+	Doctor struct {
+		Checks []struct {
+			ID, Status, Evidence string
+		} `json:"checks"`
+	} `json:"doctor"`
 	Error struct{ Code, Message string } `json:"error,omitempty"`
 }
 
@@ -48,15 +53,15 @@ func runEVEWithEnv(t *testing.T, f fixture, binary string, extra []string, args 
 	env := append(append([]string{}, f.env...), "EVE_STATE_DIR="+filepath.Join(filepath.Dir(f.root), "eve-state"))
 	cmd.Env = append(env, extra...)
 	data, err := cmd.CombinedOutput()
+	if strings.Contains(string(data), "CONVEX_DEPLOY_KEY") {
+		t.Fatal("CLI output exposed a reserved selector")
+	}
 	if err != nil {
-		t.Fatalf("eve %v: %v", args, err)
+		t.Fatalf("eve %v: %v\n%s", args, err, data)
 	}
 	var result eveResult
 	if json.Unmarshal(data, &result) != nil || result.SchemaVersion != 1 || !result.OK {
 		t.Fatalf("invalid EVE result")
-	}
-	if strings.Contains(string(data), "CONVEX_DEPLOY_KEY") {
-		t.Fatal("CLI output exposed a reserved selector")
 	}
 	return result
 }
