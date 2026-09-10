@@ -134,10 +134,21 @@ func destroySafety(ctx context.Context, s *state.Store, g *git.Client, step stat
 	}
 	return g.CheckRemoval(ctx, step.Identity, step.Workspace.Branch, reference, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, OwnedEdit: owned})
 }
+func removeStaleBranch(ctx context.Context, s *state.Store, g *git.Client, step state.DestroyStep) error {
+	if !step.NewBranch {
+		return nil
+	}
+	scratch, err := s.ScratchDir()
+	if err != nil {
+		return err
+	}
+	return g.RemoveBranch(ctx, step.Identity, step.Workspace.Branch, step.Workspace.HeadOID, scratch)
+}
 
 // DestroyLocal removes only a completed LOCAL-ONLY generation 1 workspace, or
 // resumes the exact same removal. Approval is external and cannot be inferred.
-// Branch deletion, remote deletion and process supervision are outside this call.
+// Exact unchanged EVE-created branch metadata is pruned after local/remote
+// effects; pre-existing branches and process supervision remain outside this call.
 func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.LockedWorkspace, opts DestroyOptions) (DestroyResult, error) {
 	step, err := w.DestroyStep(ctx)
 	if err != nil {
@@ -183,7 +194,7 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 			if err != nil {
 				return DestroyResult{}, err
 			}
-			if err := g.Remove(ctx, *identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges}); err != nil {
+			if err := g.Remove(ctx, *identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, RemoveBranch: step.NewBranch, ExpectedOID: step.Workspace.HeadOID}); err != nil {
 				return DestroyResult{}, err
 			}
 		}
@@ -203,6 +214,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	}
 	if step.State == "inflight" && checkAbsent {
 		if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
+			return DestroyResult{}, err
+		}
+		if err := removeStaleBranch(ctx, s, g, step); err != nil {
 			return DestroyResult{}, err
 		}
 		return finishDestroy(ctx, s, g, w, step)
@@ -247,7 +261,7 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if err != nil {
 		return DestroyResult{}, err
 	}
-	err = g.Remove(ctx, step.Identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, OwnedEdit: owned})
+	err = g.Remove(ctx, step.Identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, RemoveBranch: step.NewBranch, ExpectedOID: step.Workspace.HeadOID, OwnedEdit: owned})
 	if absent, absentErr := destroyedAbsence(step.Identity); absent && absentErr == nil {
 		journal, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

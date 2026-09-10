@@ -50,7 +50,7 @@ The complete Linux suite, native/race checks and CGo-disabled tests pass. State/
 
 ## M1 Git creation boundary
 
-The next bounded slice implements Git-aware source registration/planning, pinned committed target manifests, hook-suppressed worktree creation, durable Git intent/identity checkpoints and branch-preserving removal primitives. Real Git/SQLite tests cover moved refs, invoking-worktree isolation, dirty files, ownership refusal and lost-response reconciliation without repeating creation. A blocked checkout filter demonstrated that Git writes its lock reason before checkout finishes; observation now requires a clean worktree, stable regular index and no index lock. Cancellation also terminates the filter's process group.
+The next bounded slice implements Git-aware source registration/planning, pinned committed target manifests, hook-suppressed worktree creation, durable Git intent/identity checkpoints and exact removal primitives. Removal preserves pre-existing branches; a branch durably recorded as EVE-created is pruned only while still at its original target. Real Git/SQLite tests cover moved refs, invoking-worktree isolation, dirty files, ownership refusal, created/pre-existing branch treatment, stale-branch recovery and lost-response reconciliation without repeating creation. A blocked checkout filter demonstrated that Git writes its lock reason before checkout finishes; observation now requires a clean worktree, stable regular index and no index lock. Cancellation also terminates the filter's process group.
 
 ## M1 read-only file preflight
 
@@ -72,7 +72,7 @@ The production local-only lifecycle now commits `prepared` generation `1` after 
 
 ## M1 local-only CLI and destruction
 
-The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, branch/source preservation, occupied ports, cleanup pending and port-claim release.
+The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, source preservation, exact pruning of unchanged EVE-created branches, preservation of pre-existing target branches, occupied ports, cleanup pending and port-claim release.
 
 `TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, and verifies page JSON through a real `agent-browser` session. It destroys one remaining application while the other stays available. This is Linux frontend evidence, not cloud or macOS proof.
 

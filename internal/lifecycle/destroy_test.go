@@ -18,7 +18,7 @@ func preparedFixture(t *testing.T) (repository, GitPlan, *state.LockedWorkspace)
 	}
 	return r, p, w
 }
-func TestDestroyLocalPreservesSourceAndBranch(t *testing.T) {
+func TestDestroyLocalPreservesSourceAndTombstone(t *testing.T) {
 	r, p, w := preparedFixture(t)
 	step, err := w.DestroyStep(t.Context())
 	if err != nil {
@@ -36,8 +36,8 @@ func TestDestroyLocalPreservesSourceAndBranch(t *testing.T) {
 			t.Fatal("destroyed path remains")
 		}
 	}
-	if command(t, r.root, "branch", "--list", p.Target.Branch) == "" {
-		t.Fatal("destroy deleted its branch")
+	if command(t, r.root, "branch", "--list", p.Target.Branch) != "" {
+		t.Fatal("destroy retained EVE-created branch metadata")
 	}
 	sourceDotenv, err := os.ReadFile(filepath.Join(r.root, ".env.local"))
 	if err != nil || string(sourceDotenv) != "# user\nSECRET="+stageCanary+"\n" {
@@ -93,8 +93,8 @@ func TestDestroyUserWorkRequiresExplicitDiscard(t *testing.T) {
 			if result.Workspace.State != "destroyed" {
 				t.Fatal("discard did not complete")
 			}
-			if command(t, r.root, "branch", "--list", p.Target.Branch) == "" {
-				t.Fatal("discard deleted branch")
+			if command(t, r.root, "branch", "--list", p.Target.Branch) != "" {
+				t.Fatal("discard retained EVE-created branch metadata")
 			}
 		})
 	}
@@ -197,7 +197,7 @@ func TestDestroyReconcilesCompletedRemovalResponseLoss(t *testing.T) {
 	if result.Workspace.State != "destroyed" {
 		t.Fatal("destroy response was not reconciled")
 	}
-	if command(t, r.root, "branch", "--list", p.Target.Branch) == "" {
-		t.Fatal("reconciliation deleted branch")
+	if command(t, r.root, "branch", "--list", p.Target.Branch) != "" {
+		t.Fatal("reconciliation retained EVE-created branch metadata")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"eve/internal/domain"
+	"strings"
 )
 
 type Change struct {
@@ -41,6 +42,9 @@ func parseChanges(data []byte) ([]Change, error) {
 
 type RemovalOptions struct {
 	DiscardChanges bool
+	// RemoveBranch applies only to an EVE-created branch still at its original target.
+	RemoveBranch bool
+	ExpectedOID  string
 	// Optional future materializer hook: compare a regular tracked file and its
 	// mode against the exact recorded EVE-published HMAC. It must not approve
 	// arbitrary user changes. A nil callback treats all visible edits as user work.
@@ -125,6 +129,49 @@ func (c *Client) Remove(ctx context.Context, id domain.GitIdentity, branch, refe
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			return problem("E_CLEANUP_PENDING", "owned worktree/admin removal could not be confirmed", path)
 		}
+	}
+	if options.RemoveBranch {
+		return c.RemoveBranch(ctx, id, branch, options.ExpectedOID, scratch)
+	}
+	return nil
+}
+
+// RemoveBranch deletes only a branch whose durable EVE creation intent says it
+// originated with this workspace and whose current tip is still the intended
+// target commit. A pre-existing source branch is never passed here.
+func (c *Client) BranchReference(ctx context.Context, root, branch string) (oid string, exists bool, err error) {
+	if !safeArgument(branch) {
+		return "", false, problem("E_GIT_IDENTITY", "recorded branch name is invalid", branch)
+	}
+	result, err := c.run(ctx, root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if err != nil {
+		return "", false, err
+	}
+	if result.ExitCode == 1 {
+		return "", false, nil
+	}
+	if result.ExitCode != 0 {
+		return "", false, problem("E_GIT_COMMAND", "Git could not verify the workspace branch", branch)
+	}
+	return strings.TrimSpace(string(result.Output)), true, nil
+}
+func (c *Client) RemoveBranch(ctx context.Context, id domain.GitIdentity, branch, expectedOID, scratch string) error {
+	current, exists, err := c.BranchReference(ctx, id.CommonDir, branch)
+	if err != nil {
+		return err
+	}
+	if !exists || current != expectedOID {
+		return problem("E_GIT_REFERENCE_CHANGED", "workspace branch tip changed or is absent; review it before deletion", branch)
+	}
+	if err := c.mutate(ctx, id.CommonDir, scratch, "branch", "-D", "--", branch); err != nil {
+		return err
+	}
+	_, exists, err = c.BranchReference(ctx, id.CommonDir, branch)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return problem("E_CLEANUP_PENDING", "workspace branch removal could not be confirmed", branch)
 	}
 	return nil
 }

@@ -363,7 +363,7 @@ The source checkout is explicitly registered by `init`; its local files are the 
 
 Existing branch: use its current commit without resetting it. New branch: create from `--from`, or the registered source checkout's `HEAD`. Resolve the exact commit before mutation. Do not implicitly fetch remote refs, choose an upstream, or copy uncommitted application code.
 
-Let Git reject a branch already checked out elsewhere. Validate branch names with Git and pass arguments without a shell. Branch names are never used directly as directory paths. Preserve branches on cleanup, including branches created by EVE. [S01]
+Let Git reject a branch already checked out elsewhere. Validate branch names with Git and pass arguments without a shell. Branch names are never used directly as directory paths. Pre-existing branches are preserved. A branch recorded as EVE-created is pruned only from durable creation intent, after its branch name and current tip still match that recorded target; a changed tip or absent branch is diagnostic evidence, not replacement authorization. Worktree tombstones retain branch/path/generation identity for audit. [S01]
 
 Require a normal, non-bare repository and initialized `HEAD`. Sparse checkout/submodule orchestration is outside the initial compatibility guarantee; diagnose it before cloud provisioning rather than silently generating an incomplete environment.
 

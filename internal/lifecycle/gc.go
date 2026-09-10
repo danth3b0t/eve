@@ -56,5 +56,8 @@ func ApplyGC(ctx context.Context, s *state.Store, g *git.Client, workspaceID str
 	if err := remoteDestructionForWorkspace(ctx, s, lock, step.Workspace, DestroyOptions{Approved: true, ProviderFactory: factory}); err != nil {
 		return DestroyResult{}, err
 	}
+	if err := removeStaleBranch(ctx, s, g, step); err != nil {
+		return DestroyResult{}, err
+	}
 	return finishDestroy(ctx, s, g, lock, step)
 }

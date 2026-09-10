@@ -18,6 +18,7 @@ type DestroyStep struct {
 	Identity          domain.GitIdentity
 	CreateOperationID string
 	OperationID       string
+	NewBranch         bool
 	State             string // ready, inflight, cleanup_pending
 }
 
@@ -28,6 +29,15 @@ func readDestroyStep(ctx context.Context, tx *sql.Tx, id string) (DestroyStep, e
 		return step, err
 	}
 	step.Workspace = w
+	var intentRaw string
+	if err := tx.QueryRowContext(ctx, `SELECT id,intent_json FROM operations WHERE workspace_id=? AND command='create' ORDER BY created_at_ms DESC LIMIT 1`, id).Scan(&step.CreateOperationID, &intentRaw); err != nil {
+		return step, err
+	}
+	var intent createIntent
+	if err := json.Unmarshal([]byte(intentRaw), &intent); err != nil {
+		return step, failure("E_STATE_INTENT", "recorded creation intent is invalid")
+	}
+	step.NewBranch = intent.NewBranch
 	var git string
 	identityErr := tx.QueryRowContext(ctx, `SELECT o.id,s.outcome_metadata_json FROM operations o JOIN operation_steps s ON s.operation_id=o.id AND s.sequence=1 AND s.action='git_worktree' WHERE o.workspace_id=? AND o.command='create' AND s.state='succeeded'`, id).Scan(&step.CreateOperationID, &git)
 	hasIdentity := false
