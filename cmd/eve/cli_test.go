@@ -186,6 +186,10 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if code != 0 || !status.OK || status.Services["web"].Port == 0 || status.Workspace.State != "prepared" {
 		t.Fatalf("status: %d %s", code, stdout)
 	}
+	doctorCode, doctorOut, _, doctor := command(t, binary, root, base, "doctor", "--json", "payments")
+	if doctorCode != 0 || !doctor.OK || !strings.Contains(string(doctorOut), `"status":"pass"`) || !strings.Contains(string(doctorOut), `"status":"not_checked"`) {
+		t.Fatalf("doctor: %d %s", doctorCode, doctorOut)
+	}
 	code, _, stderr, _ = command(t, binary, root, base, "destroy", path)
 	if code != 3 || !strings.Contains(string(stderr), "E_APPROVAL_REQUIRED") {
 		t.Fatalf("unapproved destroy: %d %s", code, stderr)
@@ -195,6 +199,10 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(path, "user-file"), []byte("user work"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	doctorCode, doctorOut, _, doctor = command(t, binary, root, base, "doctor", "--json", "payments")
+	if doctorCode != 0 || !strings.Contains(string(doctorOut), `"git","status":"warning"`) {
+		t.Fatalf("doctor did not report user change: %d %s", doctorCode, doctorOut)
 	}
 	code, _, stderr, _ = command(t, binary, root, base, "destroy", "--yes", path)
 	if code != 3 || !strings.Contains(string(stderr), "E_WORKTREE_DIRTY") {

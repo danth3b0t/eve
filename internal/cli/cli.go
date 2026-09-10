@@ -25,22 +25,23 @@ import (
 )
 
 type output struct {
-	SchemaVersion   int                    `json:"schema_version"`
-	Command         string                 `json:"command"`
-	OK              bool                   `json:"ok"`
-	Workspace       *workspace             `json:"workspace,omitempty"`
-	Services        map[string]service     `json:"services,omitempty"`
-	Resources       map[string]resource    `json:"resources,omitempty"`
-	Verification    *verification          `json:"verification,omitempty"`
-	RestartRequired bool                   `json:"restart_required,omitempty"`
-	Existing        bool                   `json:"existing,omitempty"`
-	Plan            *lifecycle.PlanPreview `json:"plan,omitempty"`
-	Repositories    []repositoryGroup      `json:"repositories,omitempty"`
-	GC              []gcCandidate          `json:"gc_candidates,omitempty"`
-	Auth            map[string]string      `json:"auth,omitempty"`
-	Warnings        []string               `json:"warnings,omitempty"`
-	Error           *commandError          `json:"error,omitempty"`
-	Human           string                 `json:"-"`
+	SchemaVersion   int                     `json:"schema_version"`
+	Command         string                  `json:"command"`
+	OK              bool                    `json:"ok"`
+	Workspace       *workspace              `json:"workspace,omitempty"`
+	Services        map[string]service      `json:"services,omitempty"`
+	Resources       map[string]resource     `json:"resources,omitempty"`
+	Verification    *verification           `json:"verification,omitempty"`
+	RestartRequired bool                    `json:"restart_required,omitempty"`
+	Existing        bool                    `json:"existing,omitempty"`
+	Plan            *lifecycle.PlanPreview  `json:"plan,omitempty"`
+	Doctor          *lifecycle.DoctorResult `json:"doctor,omitempty"`
+	Repositories    []repositoryGroup       `json:"repositories,omitempty"`
+	GC              []gcCandidate           `json:"gc_candidates,omitempty"`
+	Auth            map[string]string       `json:"auth,omitempty"`
+	Warnings        []string                `json:"warnings,omitempty"`
+	Error           *commandError           `json:"error,omitempty"`
+	Human           string                  `json:"-"`
 }
 type workspace struct {
 	ID         string `json:"id"`
@@ -118,6 +119,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	} else {
 		_, _ = fmt.Fprint(stdout, result.Human)
 	}
+	if !result.OK {
+		return 3
+	}
 	return 0
 }
 func run(ctx context.Context, args []string) (*output, error) {
@@ -141,6 +145,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return sync(ctx, args[1:])
 	case "list":
 		return list(ctx, args[1:])
+	case "doctor":
+		return doctor(ctx, args[1:])
 	case "gc":
 		return gc(ctx, args[1:])
 	case "destroy":
@@ -628,6 +634,73 @@ func sync(ctx context.Context, args []string) (*output, error) {
 		response.Human = fmt.Sprintf("workspace %s already matches generation %d\n", result.Workspace.ID, result.Workspace.Generation)
 	}
 	return response, nil
+}
+func doctor(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("doctor")
+	remote := fs.Bool("remote", false, "add read-only provider identity checks")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid doctor options"}
+	}
+	if fs.NArg() > 1 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "doctor accepts at most one workspace"}
+	}
+	selector := ""
+	if fs.NArg() == 1 {
+		selector = fs.Arg(0)
+	}
+	g, s, err := storeFor(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	workspaceInfo, err := resolveWorkspace(ctx, g, s, selector)
+	if err != nil {
+		return nil, err
+	}
+	result, err := lifecycle.DoctorWorkspace(ctx, s, g, workspaceInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	if *remote {
+		lock, err := s.LockWorkspace(workspaceInfo.ID)
+		if err != nil {
+			return nil, err
+		}
+		remoteChecks, remoteErr := lifecycle.DoctorRemote(ctx, s, lock, result.Workspace, nil)
+		closeErr := lock.Close()
+		if closeErr != nil && remoteErr == nil {
+			remoteErr = closeErr
+		}
+		if remoteErr != nil {
+			return nil, remoteErr
+		}
+		kept := result.Checks[:0]
+		for _, check := range result.Checks {
+			if check.ID != "provider_remote" {
+				kept = append(kept, check)
+			}
+		}
+		result.Checks = append(kept, remoteChecks...)
+	}
+	failed := false
+	for _, check := range result.Checks {
+		if check.Status == "fail" {
+			failed = true
+		}
+	}
+	response := success("doctor", result.Workspace)
+	response.Doctor = &result
+	response.OK = !failed
+	response.Human = doctorHuman(result)
+	return response, nil
+}
+func doctorHuman(result lifecycle.DoctorResult) string {
+	var human strings.Builder
+	fmt.Fprintf(&human, "doctor for workspace %s\n", result.Workspace.ID)
+	for _, check := range result.Checks {
+		fmt.Fprintf(&human, "  %-8s %s: %s\n", check.Status, check.ID, check.Evidence)
+	}
+	return human.String()
 }
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")

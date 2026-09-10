@@ -21,6 +21,7 @@ eve resume feature/payments
 eve sync feature/payments          # stop the ordinary project launcher first
 eve destroy --yes feature/payments    # stop the ordinary project launcher first
 eve list [--all]
+eve doctor [feature/payments] [--remote]
 eve gc [--apply]
 eve auth convex login --project team:slug --token-stdin
 ```
