@@ -230,6 +230,41 @@ func TryLock(path string) (*Lock, error) {
 	return &Lock{file: f}, nil
 }
 
+// WaitLock serializes concurrent EVE operations for the same durable repository
+// identity. Like TryLock, it relies on process-death flock release and never
+// unlinks or repairs the private lock file.
+func WaitLock(path string) (*Lock, error) {
+	if _, err := CheckPrivate(filepath.Dir(path), true); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	if err != nil {
+		return nil, pathError("E_STATE_IO", "cannot open advisory lock", path)
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			f.Close()
+		}
+	}()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, pathError("E_STATE_IO", "cannot inspect advisory lock", path)
+	}
+	if err := privateInfo(path, info, false); err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		return nil, pathError("E_STATE_LOCK", "filesystem advisory locking failed", path)
+	}
+	after, err := CheckPrivate(path, false)
+	if err != nil || !os.SameFile(info, after) {
+		return nil, pathError("E_STATE_IDENTITY", "lock path changed during acquisition", path)
+	}
+	ok = true
+	return &Lock{file: f}, nil
+}
+
 func (l *Lock) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

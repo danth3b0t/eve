@@ -88,11 +88,7 @@ func (s *Store) LockRepository(id string) (*platform.Lock, error) {
 	if err := s.checkStorage(); err != nil {
 		return nil, err
 	}
-	l, err := platform.TryLock(filepath.Join(s.root, "locks", "repository-"+id+".lock"))
-	if errors.Is(err, platform.ErrLocked) {
-		return nil, failure("E_REPOSITORY_BUSY", "another EVE repository mutation is in progress")
-	}
-	return l, err
+	return platform.WaitLock(filepath.Join(s.root, "locks", "repository-"+id+".lock"))
 }
 
 func validID(id string) bool {
