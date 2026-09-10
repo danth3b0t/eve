@@ -109,4 +109,10 @@ Interactive `create` now prints a committed-target review and requires typed `ye
 `eve --version` reports 0.1.0. `scripts/release.sh` produces stripped CGo-disabled Linux/macOS amd64/arm64 binaries and `SHA256SUMS.txt`; Linux/amd64 executes expected output, while other artifacts still need physical host validation. docs/UNINSTALL.md now warns against deleting binaries/state before exact cloud cleanup.
 
 
-See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), [M4.md](M4.md), and [RELEASE.md](RELEASE.md) for scope. Physical macOS/arm64 execution, signatures/notarization, TTL maturity, broader topology sync and interaction UX remain open.
+## Completed-review stabilization
+
+The completed-project review findings now have regression coverage for option dispatch, typed create approval, incomplete create/sync recovery and destruction, provider-attempt journaling, multi-resource creation, journaled endpoint/remote sync, selector audits, incomplete HMAC bootstrap repair, publication subprocess bounds, short Git-scoped repository locks, actionable errors, named credential status/logout, global registry access, exact stale admin/branch cleanup and explicit discovery. The final Linux/amd64 `go test ./...`, CGo-disabled suite, `go vet ./...`, module verification and native/browser/race suite pass; the published Linux/amd64 binary has SHA-256 `ec483db13971069afe8c8b54c7e049b1a6689da7cfa08fc00248b4074961647d`.
+
+Physical macOS amd64/arm64 and hardware Linux/arm64 runs still cannot be claimed from this x86_64 Linux host. Kairo has an external source checkout with unrelated in-flight edits and no authorized EVE credential profile; its ignored Convex state was not scraped, so its live externally-owned validation remains credential-gated, not silently replaced with a fixture claim.
+
+See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), [M4.md](M4.md), and [RELEASE.md](RELEASE.md) for scope. Physical macOS/arm64 execution, signatures/notarization, broader topology sync and externally owned live-repository evidence remain open.
