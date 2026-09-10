@@ -18,6 +18,7 @@ eve path feature/payments
 eve status feature/payments
 eve resume feature/payments
 eve destroy --yes feature/payments    # stop the ordinary project launcher first
+eve list [--all]
 eve auth convex login --project team:slug --token-stdin
 ```
 
@@ -26,7 +27,7 @@ Repeating `create` on a prepared branch returns its existing workspace without m
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
-See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, [docs/M2.md](docs/M2.md) for Convex provider behavior, and [docs/M3.md](docs/M3.md) for current resume/recovery boundaries and remaining gates.
+See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, [docs/M2.md](docs/M2.md) for Convex provider behavior, [docs/M3.md](docs/M3.md) for resume/recovery boundaries, and [docs/M4.md](docs/M4.md) for inspection/diagnostic boundaries.
 
 ## Checks
 

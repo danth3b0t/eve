@@ -32,13 +32,13 @@ func fixture(t *testing.T) (string, string) {
 	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		configDir := filepath.Join(base, "config", "eve")
-		if err := os.MkdirAll(configDir, 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("version = 1\n[ports]\nmin = 39400\nmax = 39500\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(base, "config", "eve")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("version = 1\n[ports]\nmin = 39400\nmax = 39500\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(base, "source")
@@ -143,6 +143,14 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if runGit(t, root, "status", "--porcelain", "--untracked-files=all") != "" {
 		t.Fatal("source checkout changed")
 	}
+	listCode, listOut, _, _ := command(t, binary, root, base, "list", "--json")
+	if listCode != 0 || !strings.Contains(string(listOut), `"repositories"`) || !strings.Contains(string(listOut), created.Workspace.ID) || !strings.Contains(string(listOut), `"port":39400`) {
+		t.Fatalf("list output incomplete: code=%d out=%s", listCode, listOut)
+	}
+	allCode, allOut, _, _ := command(t, binary, root, base, "list", "--json", "--all")
+	if allCode != 0 || !strings.Contains(string(allOut), `"label":"source"`) || !strings.Contains(string(allOut), path) {
+		t.Fatalf("list --all output incomplete: %d %s", allCode, allOut)
+	}
 	code, stdout, _, _ = command(t, binary, root, base, "path", "payments")
 	if code != 0 || strings.TrimSpace(string(stdout)) != path {
 		t.Fatalf("path: %d %s", code, stdout)
@@ -181,6 +189,10 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	code, _, _, _ = command(t, binary, root, base, "path", "payments")
 	if code != 3 {
 		t.Fatalf("destroyed path code=%d", code)
+	}
+	emptyCode, emptyOut, _, _ := command(t, binary, root, base, "list", "--json")
+	if emptyCode != 0 || strings.Contains(string(emptyOut), path) || !strings.Contains(string(emptyOut), `"workspaces":[]`) {
+		t.Fatalf("destroyed workspace remained in list: %d %s", emptyCode, emptyOut)
 	}
 	if out := runGit(t, root, "status", "--porcelain", "--untracked-files=all"); out != "" {
 		t.Fatalf("source changed after lifecycle: %s", out)

@@ -32,6 +32,7 @@ type output struct {
 	Resources     map[string]resource `json:"resources,omitempty"`
 	Verification  *verification       `json:"verification,omitempty"`
 	Existing      bool                `json:"existing,omitempty"`
+	Repositories  []repositoryGroup   `json:"repositories,omitempty"`
 	Auth          map[string]string   `json:"auth,omitempty"`
 	Warnings      []string            `json:"warnings,omitempty"`
 	Error         *commandError       `json:"error,omitempty"`
@@ -55,6 +56,17 @@ type resource struct {
 	URL       string `json:"url,omitempty"`
 	SiteURL   string `json:"site_url,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+}
+type repositoryGroup struct {
+	ID         string            `json:"id"`
+	Label      string            `json:"label"`
+	Path       string            `json:"path"`
+	Workspaces []listedWorkspace `json:"workspaces"`
+}
+type listedWorkspace struct {
+	Workspace workspace           `json:"workspace"`
+	Services  map[string]service  `json:"services,omitempty"`
+	Resources map[string]resource `json:"resources,omitempty"`
 }
 type verification struct {
 	Configuration string `json:"configuration"`
@@ -112,6 +124,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return inspect(ctx, args[1:], false)
 	case "resume":
 		return resume(ctx, args[1:])
+	case "list":
+		return list(ctx, args[1:])
 	case "destroy":
 		return destroy(ctx, args[1:])
 	default:
@@ -351,6 +365,70 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows))
 	return response, nil
 }
+func list(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("list")
+	all := fs.Bool("all", false, "list every registered repository")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid list options"}
+	}
+	if fs.NArg() != 0 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "list does not accept a workspace selector"}
+	}
+	g, s, err := storeFor(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
+	}
+	checkout, err := g.Inspect(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.RepositoryForCommon(ctx, checkout.Identity.CommonDir, checkout.Identity.CommonIdentity)
+	if err != nil {
+		return nil, err
+	}
+	repos := []state.Repository{current}
+	if *all {
+		if repos, err = s.Repositories(ctx); err != nil {
+			return nil, err
+		}
+	}
+	response := &output{SchemaVersion: 1, Command: "list", OK: true}
+	var human strings.Builder
+	for _, repository := range repos {
+		group := repositoryGroup{ID: repository.ID, Label: repository.Label, Path: repository.SourcePath, Workspaces: []listedWorkspace{}}
+		workspaces, err := s.ListWorkspaces(ctx, repository.ID, false)
+		if err != nil {
+			return nil, err
+		}
+		human.WriteString(quote(repository.Label) + "\n")
+		for _, workspaceInfo := range workspaces {
+			entry := listedWorkspace{Workspace: workspace{ID: workspaceInfo.ID, Branch: workspaceInfo.Branch, Path: workspaceInfo.Path, State: workspaceInfo.State, Phase: workspaceInfo.Phase, Generation: workspaceInfo.Generation}}
+			if allocation, err := s.Allocation(ctx, workspaceInfo.ID); err != nil {
+				return nil, err
+			} else {
+				entry.Services = servicesMap(allocation)
+			}
+			if resources, err := s.Resources(ctx, workspaceInfo.ID); err != nil {
+				return nil, err
+			} else {
+				entry.Resources = resourcesMap(resources)
+			}
+			group.Workspaces = append(group.Workspaces, entry)
+			fmt.Fprintf(&human, "  %s %s gen=%d %s\n", quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Generation, workspaceInfo.Path)
+		}
+		if len(workspaces) == 0 {
+			human.WriteString("  no live workspaces\n")
+		}
+		response.Repositories = append(response.Repositories, group)
+	}
+	response.Human = human.String()
+	return response, nil
+}
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")
 	if err := fs.Parse(args); err != nil {
@@ -448,6 +526,24 @@ func success(command string, w state.Workspace) *output {
 func (o *output) setWorkspace(w state.Workspace) *output {
 	o.Workspace = &workspace{w.ID, w.Branch, w.Path, w.State, w.Phase, w.Generation}
 	return o
+}
+func servicesMap(a state.Allocation) map[string]service {
+	out := map[string]service{}
+	for _, endpoint := range a.Endpoints {
+		name := endpoint.Service
+		if endpoint.Name != "primary" {
+			name += "/" + endpoint.Name
+		}
+		out[name] = service{Port: endpoint.Port, URL: endpoint.Scheme + "://" + net.JoinHostPort(endpoint.Host, strconv.Itoa(endpoint.Port))}
+	}
+	return out
+}
+func resourcesMap(rows []state.Resource) map[string]resource {
+	out := map[string]resource{}
+	for _, row := range rows {
+		out[row.ResourceKey] = resource{Provider: row.Provider, Name: row.RemoteName, URL: row.Outputs["cloud_url"], SiteURL: row.Outputs["site_url"], ExpiresAt: row.Outputs["expires_at"]}
+	}
+	return out
 }
 func (o *output) setServices(a state.Allocation) {
 	o.Services = map[string]service{}
