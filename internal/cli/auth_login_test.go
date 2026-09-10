@@ -29,29 +29,29 @@ func TestAuthLoginStoresNamedProfileThroughInjectedValidation(t *testing.T) {
 	defer func() { os.Stdin = old; reader.Close() }()
 
 	called := 0
-	result, err := authLogin(t.Context(), []string{"--project", "team-name:app", "--profile", "kairo", "--token-stdin"}, func(ctx context.Context, token, project string) (convex.Project, error) {
+	result, err := authLogin(t.Context(), []string{"--project", "init-devs:es-staging", "--profile", "es-fe", "--token-stdin"}, func(ctx context.Context, token, project string) (convex.Project, error) {
 		called++
-		if token != "login-probe-token" || project != "team-name:app" {
+		if token != "login-probe-token" || project != "init-devs:es-staging" {
 			t.Fatal("login forwarded unexpected profile inputs")
 		}
-		return convex.Project{ID: 42, TeamID: 7, Slug: "app", TeamSlug: "team-name", Dev: "default-dev"}, nil
+		return convex.Project{ID: 42, TeamID: 7, Slug: "es-staging", TeamSlug: "init-devs", Dev: "default-dev"}, nil
 	})
 	if err != nil || !result.OK || called != 1 {
 		t.Fatalf("login failed: %v calls=%d", err, called)
 	}
-	if result.Auth["profile"] != "kairo" || result.Auth["team_slug"] != "team-name" || result.Auth["team_id"] != "7" {
+	if result.Auth["profile"] != "es-fe" || result.Auth["team_slug"] != "init-devs" || result.Auth["team_id"] != "7" {
 		t.Fatalf("auth metadata lost: %#v", result.Auth)
 	}
 	if strings.Contains(fmt.Sprintf("%v %#v", result, result), "login-probe-token") {
 		t.Fatal("login response exposed a credential")
 	}
 
-	status, err := auth(t.Context(), []string{"convex", "status", "--profile", "kairo", "--json"})
-	if err != nil || status.Auth["profile"] != "kairo" {
+	status, err := auth(t.Context(), []string{"convex", "status", "--profile", "es-fe", "--json"})
+	if err != nil || status.Auth["profile"] != "es-fe" {
 		t.Fatalf("named profile status failed: %v %#v", err, status.Auth)
 	}
-	removed, err := auth(t.Context(), []string{"convex", "logout", "--profile", "kairo", "--json"})
-	if err != nil || !removed.OK || removed.Auth["profile"] != "kairo" {
+	removed, err := auth(t.Context(), []string{"convex", "logout", "--profile", "es-fe", "--json"})
+	if err != nil || !removed.OK || removed.Auth["profile"] != "es-fe" {
 		t.Fatalf("named profile logout failed: %v %#v", err, removed.Auth)
 	}
 }
