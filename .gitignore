@@ -1,4 +1,5 @@
 node_modules/
 .turbo/
 .env.local
+/dist/
 /testdata/native-launch/packages/backend/convex/_generated/

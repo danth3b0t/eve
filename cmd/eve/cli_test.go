@@ -30,6 +30,26 @@ type envelope struct {
 	}
 }
 
+func TestVersionFormats(t *testing.T) {
+	base := t.TempDir()
+	binary := filepath.Join(base, "eve")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Dir = "."
+	if data, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, data)
+	}
+	cmd := exec.Command(binary, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil || string(out) != "eve 0.1.0\n" {
+		t.Fatalf("version: %v %s", err, out)
+	}
+	var parsed map[string]any
+	cmd = exec.Command(binary, "version", "--json")
+	out, err = cmd.CombinedOutput()
+	if err != nil || json.Unmarshal(out, &parsed) != nil || parsed["version"] != "0.1.0" || parsed["command"] != "version" || parsed["ok"] != true {
+		t.Fatalf("JSON version: %v %s", err, out)
+	}
+}
 func fixture(t *testing.T) (string, string) {
 	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())

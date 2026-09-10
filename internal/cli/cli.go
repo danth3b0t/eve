@@ -24,10 +24,13 @@ import (
 	"github.com/google/uuid"
 )
 
+const Version = "0.1.0"
+
 type output struct {
 	SchemaVersion   int                     `json:"schema_version"`
 	Command         string                  `json:"command"`
 	OK              bool                    `json:"ok"`
+	Version         string                  `json:"version,omitempty"`
 	Workspace       *workspace              `json:"workspace,omitempty"`
 	Services        map[string]service      `json:"services,omitempty"`
 	Resources       map[string]resource     `json:"resources,omitempty"`
@@ -114,6 +117,9 @@ type commandError struct {
 // usage; EVE never launches applications or edits scripts from this command.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	jsonMode := len(args) > 0 && wantsJSON(args[1:])
+	if len(args) == 1 && args[0] == "--version" {
+		args = []string{"version"}
+	}
 	result, err := run(ctx, args)
 	if err != nil {
 		code := exitCode(err)
@@ -146,6 +152,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "a command is required"}
 	}
 	switch args[0] {
+	case "version":
+		return &output{SchemaVersion: 1, Command: "version", OK: true, Version: Version, Human: "eve " + Version + "\n"}, nil
 	case "auth":
 		return auth(ctx, args[1:])
 	case "init":
@@ -973,7 +981,7 @@ func exitCode(err error) int {
 		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
- case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
+	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
 		return 3
 	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2

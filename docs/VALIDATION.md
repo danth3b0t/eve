@@ -92,9 +92,13 @@ Bounded `gc` is report-only by default. `gc --apply` verifies recorded worktree/
 Additive/value-only `sync` runs local and Git drift checks before any remote write, uploads only declared resource env keys, publishes generation 2 with fresh fingerprints, and reports `restart_required`. Tests cover absent bytecode no-ops, unmanaged content, drift/overwrite, remote additive values, and destruction after sync.
 ## M4 inspection
 
-Read-only `eve list [--all]` reports registered repositories, live workspaces, public ports and public Convex metadata without creating locks, credentials, files or remote calls. CLI tests confirm the same workspace appears with its assigned port and disappears from the default report after exact destruction. Discovery/`init`/`doctor` remain unimplemented.
+Read-only `eve list [--all]` reports registered repositories, live workspaces, public ports and public Convex metadata without creating locks, credentials, files or remote calls. CLI tests confirm the same workspace appears with its assigned port and disappears from the default report after exact destruction. Broader framework discovery remains limited.
 `eve init` is restricted to the proven committed Bun/Vite/Convex pattern. Unsupported layouts refuse; its dry run mutates nothing and `--write --yes` creates an exclusive `0600` manifest that then passes `plan` after manual review/commit.
 `eve doctor` verifies registry/Git/current file HMACs, endpoint availability, resource expiry and optional exact remote identity while leaving runtime/loader unread. Tests cover drift warnings and remote identity without environment/key queries.
 `eve plan` independently evaluates the committed target before registration/mutation; CLI evidence confirms no registry database or worktrees are created and no ports/providers are exercised.
+## M5 packaging foundation
 
-See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), and [M4.md](M4.md) for scope. Broader framework layouts, loader-specific discovery and release packaging are not implemented.
+`eve --version` reports 0.1.0. `scripts/release.sh` produces stripped CGo-disabled Linux/macOS amd64/arm64 binaries and `SHA256SUMS.txt`; Linux/amd64 executes expected output, while other artifacts still need physical host validation. docs/UNINSTALL.md now warns against deleting binaries/state before exact cloud cleanup.
+
+
+See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), [M4.md](M4.md), and [RELEASE.md](RELEASE.md) for scope. Physical macOS/arm64 execution, signatures/notarization, TTL maturity, broader topology sync and interaction UX remain open.

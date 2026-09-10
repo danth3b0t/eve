@@ -13,6 +13,7 @@ The guarded CLI now supports `create`, `path`, `status`, `resume`, additive `syn
 Only explicit mutations are supported, and interactive approval is not implemented in this slice:
 
 ```sh
+eve --version
 eve create --yes feature/payments       # branch worktree, reservations, native files
 eve init [--dry-run] [--write --yes --project team:slug]
 eve plan feature/payments
@@ -33,6 +34,7 @@ Use `--discard-changes` to authorize discarding reviewed user work, and `--assum
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
 See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, [docs/M2.md](docs/M2.md) for Convex provider behavior, [docs/M3.md](docs/M3.md) for resume/recovery boundaries, and [docs/M4.md](docs/M4.md) for inspection/diagnostic boundaries.
+Release artifacts and uninstall boundaries are documented in [docs/RELEASE.md](docs/RELEASE.md) and [docs/UNINSTALL.md](docs/UNINSTALL.md).
 
 ## Checks
 
