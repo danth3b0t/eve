@@ -47,6 +47,18 @@ func TestManagementProfileIntentAndVerification(t *testing.T) {
 		t.Fatal("failed login rotated token")
 	}
 }
+func TestHyphenatedManagementProfileNameIsSupported(t *testing.T) {
+	s, _ := fixture(t)
+	token := "es-fe-management-token"
+	profile, err := s.StoreManagementProfile(t.Context(), "convex", "es-fe", "init-devs", 42, token, time.Unix(100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, raw, err := s.ManagementToken(t.Context(), "convex", "es-fe")
+	if err != nil || raw != token || got.Name != "es-fe" || got.TeamSlug != "init-devs" || got.CredentialID != profile.CredentialID {
+		t.Fatalf("hyphenated profile round trip failed: %+v %v", got, err)
+	}
+}
 func TestManagementProfileInterruptedRecovery(t *testing.T) {
 	for _, kind := range []string{"missing", "partial", "same-size"} {
 		t.Run(kind, func(t *testing.T) {

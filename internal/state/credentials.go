@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"eve/internal/private"
@@ -22,8 +23,10 @@ type ManagementProfile struct {
 	LastValidatedAtMS                      int64
 }
 
+var managementProfileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,47}$`)
+
 func validManagement(provider, name, teamSlug string, teamID int64) bool {
-	return provider == "convex" && envKey.MatchString(name) && teamSlug != "" && teamID > 0
+	return provider == "convex" && managementProfileName.MatchString(name) && teamSlug != "" && teamID > 0
 }
 
 // StoreManagementProfile persists a validated token scope BEFORE the token is
