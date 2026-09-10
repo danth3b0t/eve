@@ -82,6 +82,7 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 	result := bindingResult{outputs: map[string]resolve.ResourceOutputs{}, secrets: map[string]map[string]string{}}
 	prepared := make([]preparedResource, 0, len(resources))
 
+	validatedProjects := map[string]convex.Project{}
 	// Phase one verifies all declared remote identities, creates/joins exact
 	// resources, and collects outputs. It never resolves a whole manifest while
 	// one of its resource siblings still lacks outputs.
@@ -98,19 +99,24 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 		if err != nil {
 			return result, err
 		}
-		project, err := api.ValidateProject(ctx, r.Spec.Project)
-		if err != nil {
-			return result, err
-		}
-		if identity.TeamID != 0 && identity.TeamID != project.TeamID || identity.TeamSlug != "" && identity.TeamSlug != project.TeamSlug {
-			return result, &domain.Error{Code: "E_PROVIDER_IDENTITY", Message: "credential profile no longer belongs to the manifest's team"}
-		}
-		for kind, name := range map[string]string{"dev": project.Dev, "prod": project.Prod} {
-			if name != "" {
-				if _, err := api.InspectDefault(ctx, name, kind, project.ID); err != nil {
-					return result, err
+		validationKey := r.Spec.Profile + "\x00" + r.Spec.Project + "\x00" + r.Spec.Region
+		project, known := validatedProjects[validationKey]
+		if !known {
+			project, err = api.ValidateProject(ctx, r.Spec.Project)
+			if err != nil {
+				return result, err
+			}
+			if identity.TeamID != 0 && identity.TeamID != project.TeamID || identity.TeamSlug != "" && identity.TeamSlug != project.TeamSlug {
+				return result, &domain.Error{Code: "E_PROVIDER_IDENTITY", Message: "credential profile no longer belongs to the manifest's team"}
+			}
+			for kind, name := range map[string]string{"dev": project.Dev, "prod": project.Prod} {
+				if name != "" {
+					if _, err := api.InspectDefault(ctx, name, kind, project.ID); err != nil {
+						return result, err
+					}
 				}
 			}
+			validatedProjects[validationKey] = project
 		}
 		r.RemoteProjectID = strconv.FormatInt(project.ID, 10)
 		attemptStart := r.AttemptStartedAtMS
