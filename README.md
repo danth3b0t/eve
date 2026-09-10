@@ -10,7 +10,7 @@ M0's Linux Bun/Turbo/Convex live evidence passes, including inherited defaults, 
 
 The guarded CLI now supports `create`, `path`, `status`, `resume`, additive `sync`, `list`, bounded `gc`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. Broader topology sync, discovery/onboarding UX and M4–M5 remain pending.
 
-Only explicit mutations are supported, and interactive approval is not implemented in this slice:
+Interactive creation shows a preview and asks for typed `yes`; automation uses flags/JSON without prompting:
 
 ```sh
 eve --version

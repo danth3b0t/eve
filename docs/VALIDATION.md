@@ -98,6 +98,7 @@ Read-only `eve list [--all]` reports registered repositories, live workspaces, p
 `eve init` is restricted to the proven committed Bun/Vite/Convex pattern. Unsupported layouts refuse; its dry run mutates nothing and `--write --yes` creates an exclusive `0600` manifest that then passes `plan` after manual review/commit.
 `eve doctor` verifies registry/Git/current file HMACs, endpoint availability, resource expiry and optional exact remote identity while leaving runtime/loader unread. Tests cover drift warnings and remote identity without environment/key queries.
 `eve plan` independently evaluates the committed target before registration/mutation; CLI evidence confirms no registry database or worktrees are created and no ports/providers are exercised.
+Interactive `create` now prints a committed-target review and requires typed `yes`; pure noninteractive, JSON and refusal paths are tested with no registry mutation.
 ## M5 packaging foundation
 
  Linux/arm64 QEMU execution passes the release version command and the CGo-disabled state/files/lifecycle suites. Self-executing crash fixtures were skipped because QEMU child re-exec was unavailable; this remains emulated evidence, not hardware arm64 or macOS evidence.

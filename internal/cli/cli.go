@@ -242,7 +242,7 @@ func loadConfig() (config.UserConfig, error) {
 }
 
 func create(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("create")
+	fs, jsonOut := newFlags("create")
 	yes := fs.Bool("yes", false, "approve source registration, allocation and this workspace creation")
 	from := fs.String("from", "", "existing commit/ref for a new branch")
 	if err := fs.Parse(args); err != nil {
@@ -252,6 +252,28 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "create requires one branch"}
 	}
 	branch := fs.Arg(0)
+	if !*yes && !*jsonOut {
+		g, err := git.New()
+		if err != nil {
+			return nil, err
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current checkout is inaccessible"}
+		}
+		preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, branch, *from)
+		if err != nil {
+			return nil, err
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Create workspace for %s\nsource: %s\ntarget commit: %s\nmanifest destinations: %d\nNew worktree and provider effects require typed approval.\n", quote(preview.Branch), preview.Source, preview.HeadOID, len(preview.Files.Files))
+		approved, err := interactiveYes(ctx, "Create this workspace?")
+		if err != nil {
+			return nil, err
+		}
+		if !approved {
+			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "create was not approved; no state or workspace was changed"}
+		}
+	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
 		return nil, err
