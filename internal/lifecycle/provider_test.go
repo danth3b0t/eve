@@ -98,6 +98,7 @@ func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bo
 	var posts int
 	var created convex.CreateDeploymentArgs
 	var deleted bool
+	envState := map[string]string{"UNRELATED": "unrelated-canary"}
 	return func(token string) (convexAdapter, error) {
 		if token != "auth-holder-sentinel" {
 			return nil, fmt.Errorf("unexpected token scope")
@@ -170,7 +171,11 @@ func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bo
 			case "GET calm-cow-456.eu-west-1.convex.cloud/api/v1/get_canonical_urls":
 				return body(200, `{"convexCloudUrl":"https://calm-cow-456.eu-west-1.convex.cloud","convexSiteUrl":"https://calm-cow-456.eu-west-1.convex.site"}`), nil
 			case "GET calm-cow-456.eu-west-1.convex.cloud/api/v1/list_environment_variables":
-				return body(200, `{"environmentVariables":{"UNRELATED":"unrelated-canary"}}`), nil
+				current, err := json.Marshal(map[string]map[string]string{"environmentVariables": envState})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return body(200, string(current)), nil
 			case "POST calm-cow-456.eu-west-1.convex.cloud/api/v1/update_environment_variables":
 				var request struct {
 					Changes []map[string]string `json:"changes"`
@@ -185,6 +190,7 @@ func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bo
 						t.Fatal("remote update included unowned key")
 					}
 					merged[name] = change["value"]
+					envState[name] = change["value"]
 				}
 				managed <- merged
 				return body(200, ""), nil

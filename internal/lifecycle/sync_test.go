@@ -214,7 +214,7 @@ EXTRA_LOCAL = "synced"
 		t.Fatalf("declared sync failed: %v", err)
 	}
 	update := <-managed
-	if update["CUSTOM_SYNC"] != plan.WorkspaceID || update["SITE_URL"] == "" {
+	if update["CUSTOM_SYNC"] != plan.WorkspaceID || update["SITE_URL"] != "" {
 		t.Fatalf("unexpected remote sync update: %v", update)
 	}
 	resources, err := r.store.Resources(t.Context(), plan.WorkspaceID)

@@ -282,6 +282,13 @@ func (w *LockedWorkspace) CompleteSync(ctx context.Context, owners map[string]ma
 			if step.State != "publish_inflight" {
 				return failure("E_SYNC_STATE", "no sync publication is ready")
 			}
+			if step.Intent.Manifest == nil || !fingerprint.MatchString(step.Intent.ManifestSHA256) {
+				return failure("E_SYNC_STATE", "applied manifest intent is incomplete")
+			}
+			applied, err := json.Marshal(step.Intent.Manifest)
+			if err != nil {
+				return failure("E_SYNC_STATE", "applied manifest could not be encoded")
+			}
 			for _, f := range step.Files {
 				if f.State != "succeeded" || len(owners[f.Path]) != len(f.Values) {
 					return failure("E_SYNC_STATE", "sync publication or ownership is incomplete")
@@ -318,7 +325,7 @@ func (w *LockedWorkspace) CompleteSync(ctx context.Context, owners map[string]ma
 			if _, err := tx.ExecContext(ctx, `UPDATE operations SET state='succeeded',phase='complete',updated_at_ms=?,finished_at_ms=? WHERE id=?`, now, now, step.OperationID); err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE workspaces SET state='prepared',phase='complete',generation=?,updated_at_ms=?,diagnostic_code=NULL WHERE id=?`, next, now, w.id)
+			_, err = tx.ExecContext(ctx, `UPDATE workspaces SET state='prepared',phase='complete',generation=?,applied_manifest_json=?,updated_at_ms=?,diagnostic_code=NULL WHERE id=?`, next, string(applied), now, w.id)
 			return err
 		})
 	})

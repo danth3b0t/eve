@@ -21,8 +21,8 @@ func (w *LockedWorkspace) AppendSyncEndpoints(ctx context.Context, endpoints []E
 			if err := tx.QueryRowContext(ctx, `SELECT coalesce(b.base,0),coalesce(b.size,0),w.state,w.generation FROM workspaces w LEFT JOIN port_blocks b ON b.workspace_id=w.id WHERE w.id=?`, w.id).Scan(&base, &size, &state, &generation); err != nil {
 				return err
 			}
-			if state != "prepared" || generation < 1 {
-				return failure("E_SYNC_STATE", "endpoint additions require a prepared workspace")
+			if (state != "prepared" && state != "syncing") || generation < 1 {
+				return failure("E_SYNC_STATE", "endpoint additions require a prepared/journaled workspace")
 			}
 			for _, endpoint := range endpoints {
 				if endpoint.Service == "" || endpoint.Name == "" || endpoint.Name == "primary" || !envfile.ValidKey(endpoint.Env) || config.ReservedLocalKey(endpoint.Env) || endpoint.Slot < 0 || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Port <= 0 || endpoint.Port > 65535 {

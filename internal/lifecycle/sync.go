@@ -33,6 +33,8 @@ type syncPlan struct {
 	Manifest                *config.Manifest
 	Owners                  map[string]map[string][]string
 	Images                  []files.Image
+	Additions               []state.Endpoint
+	RemoteChanged           bool
 	Unchanged               bool
 }
 
@@ -49,6 +51,10 @@ func SyncWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspace
 		return SyncResult{}, err
 	}
 	defer lock.Close()
+	return syncWorkspaceLocked(ctx, s, g, lock, options)
+}
+
+func syncWorkspaceLocked(ctx context.Context, s *state.Store, g *git.Client, lock *state.LockedWorkspace, options SyncOptions) (SyncResult, error) {
 	step, err := lock.SyncStep(ctx)
 	if err != nil {
 		return SyncResult{}, err
@@ -78,7 +84,7 @@ func SyncWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspace
 		if err != nil {
 			return SyncResult{}, err
 		}
-		return finishSync(ctx, s, g, lock, step)
+		return finishSync(ctx, s, g, lock, step, options.factory())
 	case "images_inflight":
 		if err := resumeSyncImages(ctx, s, lock, step); err != nil {
 			return SyncResult{}, err
@@ -87,9 +93,9 @@ func SyncWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspace
 		if err != nil {
 			return SyncResult{}, err
 		}
-		return finishSync(ctx, s, g, lock, step)
+		return finishSync(ctx, s, g, lock, step, options.factory())
 	case "staged", "publish_inflight":
-		return finishSync(ctx, s, g, lock, step)
+		return finishSync(ctx, s, g, lock, step, options.factory())
 	default:
 		return SyncResult{}, &domain.Error{Code: "E_SYNC_STATE", Message: "unrecognized sync journal state"}
 	}
@@ -118,13 +124,17 @@ func prepareSyncPlan(ctx context.Context, s *state.Store, g *git.Client, lock *s
 	if err != nil {
 		return syncPlan{}, err
 	}
-	if err := syncTopology(&step.Workspace.Manifest, manifest); err != nil {
+	currentManifest := &step.Workspace.AppliedManifest
+	if currentManifest.Version == 0 {
+		currentManifest = &step.Workspace.Manifest
+	}
+	if err := syncTopology(currentManifest, manifest); err != nil {
 		if err := g.CheckPublication(ctx, step.Identity, step.Workspace.Branch, checkout.HeadOID); err != nil {
 			return syncPlan{}, err
 		}
 		return syncPlan{}, err
 	}
-	allocation, additions, err := syncTopologyAndEndpoints(&step.Workspace.Manifest, manifest, allocation)
+	allocation, additions, err := syncTopologyAndEndpoints(currentManifest, manifest, allocation)
 	if err != nil {
 		return syncPlan{}, err
 	}
@@ -133,11 +143,6 @@ func prepareSyncPlan(ctx context.Context, s *state.Store, g *git.Client, lock *s
 	}
 	for _, endpoint := range additions {
 		if err := ports.ProbeTCP(ctx, endpoint.Port); err != nil {
-			return syncPlan{}, err
-		}
-	}
-	if len(additions) != 0 {
-		if err := lock.AppendSyncEndpoints(ctx, additions); err != nil {
 			return syncPlan{}, err
 		}
 	}
@@ -154,14 +159,14 @@ func prepareSyncPlan(ctx context.Context, s *state.Store, g *git.Client, lock *s
 		return syncPlan{}, err
 	}
 	hash := sha256.Sum256(raw)
-	unchanged := true
+	unchanged := len(additions) == 0 && !model.RemoteChanged
 	for _, image := range model.Images {
 		if !bytes.Equal(image.Data, image.Preimage) {
 			unchanged = false
 			break
 		}
 	}
-	return syncPlan{HeadOID: checkout.HeadOID, ManifestSHA256: hex.EncodeToString(hash[:]), Manifest: manifest, Owners: model.Owners, Images: model.Images, Unchanged: unchanged}, nil
+	return syncPlan{HeadOID: checkout.HeadOID, ManifestSHA256: hex.EncodeToString(hash[:]), Manifest: manifest, Owners: model.Owners, Images: model.Images, Additions: additions, RemoteChanged: model.RemoteChanged, Unchanged: unchanged}, nil
 }
 
 func syncTopologyAndEndpoints(old, next *config.Manifest, allocation state.Allocation) (state.Allocation, []state.Endpoint, error) {
@@ -236,8 +241,9 @@ func extraPortsCompatible(old, next map[string]config.ExtraPort) bool {
 }
 
 type syncModel struct {
-	Images []files.Image
-	Owners map[string]map[string][]string
+	Images        []files.Image
+	Owners        map[string]map[string][]string
+	RemoteChanged bool
 }
 type modelResources struct {
 	Outputs     map[string]resolve.ResourceOutputs
@@ -270,38 +276,88 @@ func syncModelResources(ctx context.Context, s *state.Store, lock *state.LockedW
 	}
 	return out, nil
 }
+
+type remoteEnvReview struct {
+	api     convexAdapter
+	deploy  convex.Deployment
+	key     string
+	changes map[string]string
+}
+
+func reviewRemoteEnv(ctx context.Context, s *state.Store, lock *state.LockedWorkspace, workspace state.Workspace, r state.Resource, desired map[string]string, factory convexFactory) (remoteEnvReview, error) {
+	review := remoteEnvReview{}
+	_, token, err := managementCredential(ctx, s, r.Spec.Profile)
+	if err != nil {
+		return review, err
+	}
+	review.api, err = factory(token)
+	if err != nil {
+		return review, err
+	}
+	project, err := review.api.ValidateProject(ctx, r.Spec.Project)
+	if err != nil {
+		return review, err
+	}
+	observed, err := recordedDeployment(r)
+	if err != nil {
+		return review, err
+	}
+	attemptStart := r.AttemptStartedAtMS
+	if attemptStart == 0 {
+		attemptStart = workspace.CreatedAtMS
+	}
+	intent := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: attemptStart, ExpiresMS: r.IntendedExpiresAtMS}
+	review.deploy, err = review.api.Inspect(ctx, intent, observed)
+	if err != nil {
+		return review, err
+	}
+	if review.deploy.URL != r.Outputs["cloud_url"] {
+		return review, &domain.Error{Code: "E_PROVIDER_IDENTITY", Message: "recorded deployment URL no longer matches state"}
+	}
+	review.key, err = lock.DeployKeyCredential(ctx, r)
+	if err != nil {
+		return review, err
+	}
+	existing, err := review.api.Env(ctx, review.deploy, review.key)
+	if err != nil {
+		return review, err
+	}
+	changes := map[string]string{}
+	for name, value := range desired {
+		if !envfile.ValidKey(name) || config.ReservedLocalKey(name) {
+			return review, &domain.Error{Code: "E_PROVIDER_INTENT", Message: "remote environment key is reserved or invalid"}
+		}
+		if existing[name] != value {
+			changes[name] = value
+		}
+	}
+	review.changes = changes
+	return review, nil
+}
+
+func remoteSyncChanged(ctx context.Context, s *state.Store, lock *state.LockedWorkspace, workspace state.Workspace, resources []state.Resource, resolved *resolve.Result, factory convexFactory) (bool, error) {
+	for _, r := range resources {
+		review, err := reviewRemoteEnv(ctx, s, lock, workspace, r, resolved.RemoteEnv[r.ResourceKey], factory)
+		if err != nil {
+			return false, err
+		}
+		if len(review.changes) != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func configureRemoteSync(ctx context.Context, s *state.Store, lock *state.LockedWorkspace, workspace state.Workspace, resources []state.Resource, resolved *resolve.Result, factory convexFactory) error {
 	for _, r := range resources {
-		_, token, err := managementCredential(ctx, s, r.Spec.Profile)
+		review, err := reviewRemoteEnv(ctx, s, lock, workspace, r, resolved.RemoteEnv[r.ResourceKey], factory)
 		if err != nil {
 			return err
 		}
-		api, err := factory(token)
-		if err != nil {
-			return err
-		}
-		project, err := api.ValidateProject(ctx, r.Spec.Project)
-		if err != nil {
-			return err
-		}
-		observed, err := recordedDeployment(r)
-		if err != nil {
-			return err
-		}
-		intent := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: workspace.CreatedAtMS, ExpiresMS: r.IntendedExpiresAtMS}
-		d, err := api.Inspect(ctx, intent, observed)
-		if err != nil {
-			return err
-		}
-		if d.URL != r.Outputs["cloud_url"] {
-			return &domain.Error{Code: "E_PROVIDER_IDENTITY", Message: "recorded deployment URL no longer matches state"}
-		}
-		secret, err := lock.DeployKeyCredential(ctx, r)
-		if err != nil {
-			return err
-		}
-		if err := configureResourceEnv(ctx, api, d, secret, resolved.RemoteEnv[r.ResourceKey]); err != nil {
-			return err
+		if len(review.changes) != 0 {
+			if err := review.api.UpdateEnv(ctx, review.deploy, review.key, review.changes); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -345,7 +401,14 @@ func syncImagesModel(ctx context.Context, s *state.Store, lock *state.LockedWork
 		return syncModel{}, err
 	}
 	current := map[string]currentDestination{}
+	valuedPaths := map[string]bool{}
+	for _, value := range managedValues {
+		valuedPaths[value.Path] = true
+	}
 	for _, file := range managed {
+		if _, native := desired[file.Path]; !native && !valuedPaths[file.Path] {
+			continue
+		}
 		data, identity, err := files.ReadDestination(ctx, step.Identity, file.Path)
 		if err != nil {
 			return syncModel{}, err
@@ -383,10 +446,11 @@ func syncImagesModel(ctx context.Context, s *state.Store, lock *state.LockedWork
 		}
 		images = append(images, files.Image{Path: name, Mode: 0600, Tracked: origin.Tracked, Data: image, Preimage: origin.Data, PreimageIdentity: origin.PreimageIdentity, Values: maps.Clone(data)})
 	}
-	if err := configureRemoteSync(ctx, s, lock, step.Workspace, resources, resolved, options.factory()); err != nil {
+	remoteChanged, err := remoteSyncChanged(ctx, s, lock, step.Workspace, resources, resolved, options.factory())
+	if err != nil {
 		return syncModel{}, err
 	}
-	return syncModel{Images: images, Owners: owners}, nil
+	return syncModel{Images: images, Owners: owners, RemoteChanged: remoteChanged}, nil
 }
 
 func stageSyncPlan(ctx context.Context, s *state.Store, lock *state.LockedWorkspace, workspaceID string, plan syncPlan) error {
@@ -444,7 +508,60 @@ func resumeSyncImages(ctx context.Context, s *state.Store, lock *state.LockedWor
 	}
 	return lock.RecordSyncImages(ctx)
 }
-func finishSync(ctx context.Context, s *state.Store, g *git.Client, lock *state.LockedWorkspace, step state.SyncStep) (SyncResult, error) {
+
+func applyJournaledSyncScope(ctx context.Context, s *state.Store, lock *state.LockedWorkspace, step state.SyncStep, factory convexFactory) error {
+	if step.Intent.Manifest == nil {
+		return &domain.Error{Code: "E_SYNC_STATE", Message: "applied manifest is missing from the sync journal"}
+	}
+	currentManifest := &step.Workspace.AppliedManifest
+	if currentManifest.Version == 0 {
+		currentManifest = &step.Workspace.Manifest
+	}
+	allocation, err := s.Allocation(ctx, step.Workspace.ID)
+	if err != nil {
+		return err
+	}
+	_, additions, err := syncTopologyAndEndpoints(currentManifest, step.Intent.Manifest, allocation)
+	if err != nil {
+		return err
+	}
+	for _, endpoint := range additions {
+		if err := ports.ProbeTCP(ctx, endpoint.Port); err != nil {
+			return err
+		}
+	}
+	if len(additions) != 0 {
+		if err := lock.AppendSyncEndpoints(ctx, additions); err != nil {
+			return err
+		}
+		allocation, err = s.Allocation(ctx, step.Workspace.ID)
+		if err != nil {
+			return err
+		}
+	}
+	resources, err := lock.Resources(ctx)
+	if err != nil {
+		return err
+	}
+	if len(resources) == 0 {
+		return nil
+	}
+	resourceLinks, err := syncModelResources(ctx, s, lock, resources)
+	if err != nil {
+		return err
+	}
+	input := localInputs(step.Workspace, allocation)
+	input.Resources = resourceLinks.Outputs
+	resolved, err := resolve.Resolve(step.Intent.Manifest, input)
+	if err != nil {
+		return err
+	}
+	if factory == nil {
+		factory = defaultConvexFactory
+	}
+	return configureRemoteSync(ctx, s, lock, step.Workspace, resources, resolved, factory)
+}
+func finishSync(ctx context.Context, s *state.Store, g *git.Client, lock *state.LockedWorkspace, step state.SyncStep, factory convexFactory) (SyncResult, error) {
 	if step.State == "" || step.Intent.KeyID == "" {
 		var err error
 		step, err = lock.SyncStep(ctx)
@@ -460,6 +577,9 @@ func finishSync(ctx context.Context, s *state.Store, g *git.Client, lock *state.
 		if step, e = lock.SyncStep(ctx); e != nil {
 			return SyncResult{}, e
 		}
+	}
+	if err := applyJournaledSyncScope(ctx, s, lock, step, factory); err != nil {
+		return SyncResult{}, err
 	}
 	_, key, err := s.HMACKey(ctx)
 	if err != nil {

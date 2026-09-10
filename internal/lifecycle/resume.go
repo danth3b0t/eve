@@ -42,6 +42,9 @@ func ResumeWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspa
 		return result.Workspace, err
 	case "creating":
 		return resumeCreate(ctx, s, g, lock, workspace, options)
+	case "syncing":
+		result, err := syncWorkspaceLocked(ctx, s, g, lock, SyncOptions{ProviderFactory: options.provider()})
+		return result.Workspace, err
 	default:
 		return state.Workspace{}, &domain.Error{Code: "E_CREATE_RESUME", Message: "this workspace is not in an active create/destroy operation"}
 	}
