@@ -38,7 +38,7 @@ The statements above describe specification writing. The repository now also con
 
 On September 9, 2026, `go test ./...`, `go vet ./...`, and `EVE_M0_NATIVE=1 go test -race ./tests/m0 -count=1 -v` passed on Linux/amd64. Native tests exercised the **frontend-only slice** of a pinned Bun/Turbo/Vite fixture across a committed baseline and two real Git worktrees. They also reproduced an unsupported process-env-only loader and ambient-variable conflicts. Provider-probe safety tests and pinned API checksum checks passed offline.
 
-The first supplied-token live runs demonstrated the unfiltered launch, cloud identity/keys/expiry/URLs, key isolation, exact deletion and preservation of project/default identities, but failed the missing-development-default marker checks. After the operator added that default, the full live test passed in 17.05 seconds, including all three inheritance assertions. All seven deployments across those runs were confirmed deleted. Regional URLs, browser execution and macOS remain unverified.
+The first supplied-token live runs demonstrated the unfiltered launch, cloud identity/keys/expiry/URLs, key isolation, exact deletion and preservation of project/default identities, but failed the missing-development-default marker checks. After the operator added that default, the full live test passed in 17.05 seconds, including all three inheritance assertions. All seven deployments across those runs were confirmed deleted. macOS and arm64 remain unverified.
 
 ## M1 configuration foundation
 
@@ -68,19 +68,19 @@ Real Git/SQLite tests kill a subprocess after partial or complete image sets but
 
 The production local-only lifecycle now commits `prepared` generation `1` after verified atomic per-file publication. Tests cover fresh Git/filesystem policy, occupied endpoints, missing parents, late parent-link substitution, no-replace rename, exact receipt reconciliation after SIGKILL, user-edit refusal and verified post-completion snapshot cleanup.
 
-`TestPublishedLifecycleNativeFrontends` prepares two real worktrees with production APIs and then runs unchanged Bun/Turbo/Vite frontend commands. Independent ports and public configuration pass; scripts/configuration/lockfiles remain unchanged. Installation and supervision are test-harness actions. The unprovisioned backend is excluded with the existing frontend filters; no live cloud or browser-execution claim follows.
+`TestPublishedLifecycleNativeFrontends` prepares two real worktrees with production APIs and then runs unchanged Bun/Turbo/Vite frontend commands. Independent ports and public configuration pass; scripts/configuration/lockfiles remain unchanged. Installation and supervision are test-harness actions and no live cloud claim follows here.
 
 ## M1 local-only CLI and destruction
 
 The real `eve` executable now creates, reports and destroys LOCAL-ONLY workspaces through the guarded `--yes` path. Real CLI tests cover consent gates, JSON output, selectors, dirty work, readonly inspection, exact-owned tracked files, branch/source preservation, occupied ports, cleanup pending and port-claim release.
 
-`TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, stops one normally, destroys it, and verifies that the other continues. The stopped harness closes client idle connections before signaling the application; without that, TIME_WAIT can hold an exclusive probe after the process exits. This is Linux frontend evidence only, not browser/Cloud/macOS proof.
+`TestCLILocalLifecycleNativeFrontends` creates two independent monorepo worktrees, starts unchanged Bun/Turbo/Vite commands in both, and verifies page JSON through a real `agent-browser` session. It destroys one remaining application while the other stays available. This is Linux frontend evidence, not cloud or macOS proof.
 
 ## M2 Convex lifecycle
 
 Production `eve` now provisions and destroys exact nondefault Convex dev deployments. An 80.74-second Linux run created two workspaces and two independent five-day deployments, pushed fixture code through the ordinary Convex CLI, verified each backend's configured `SITE_URL`, destroyed the first while the second kept running, then deleted the second and verified that no `dev/eve/` deployment remained. Original project/default identities were preserved. Earlier failed runs left four deployment names; each exact nondefault test-owned resource was verified and deleted.
 
-A 96.91-second `aws-eu-west-1` production run also passed and left no resources. Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS/browser/TTL-elapsed gates remain open.
+A 96.91-second `aws-eu-west-1` production run also passed and left no resources. Browser validation passed with `agent-browser` 0.16.3 against EVE-generated worktrees. Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS/TTL-elapsed gates remain open.
 
 ## M3 initial resume
 

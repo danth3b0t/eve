@@ -112,6 +112,23 @@ func TestCLILocalLifecycleNativeFrontends(t *testing.T) {
 		}
 		p := wt.start(t, "run", "dev", "--filter=@eve-m0/web", "--filter=@eve-m0/admin")
 		assertFrontends(t, p, v)
+		if os.Getenv("EVE_M0_BROWSER") == "1" {
+			for index, app := range []string{"web", "admin"} {
+				session := created.Workspace.Branch + "-" + app
+				url := fmt.Sprintf("http://127.0.0.1:%d", v.ports[index])
+				deadline := time.Now().Add(30 * time.Second)
+				for {
+					got, ok := browserConfigJSON(t, session, url)
+					if ok && got["url"] == v.url && got["siteUrl"] == v.siteURL {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("CLI browser %s saw %v", session, got)
+					}
+					time.Sleep(250 * time.Millisecond)
+				}
+			}
+		}
 		worktrees = append(worktrees, wt)
 		values = append(values, v)
 		processes = append(processes, p)
