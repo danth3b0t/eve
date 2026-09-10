@@ -30,6 +30,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 ## Current release evidence
 
 - Source tests: full native, race, CGo-disabled and documentation suites pass on Linux/amd64.
+- Guided Convex onboarding: backend-only/resource-only manifests, local/custom URL key import without values, reviewed incremental manifest updates, same-invocation provider validation reuse, defaults-only zero remote-env requests, and redacted create phase timings are covered on Linux/amd64.
 - Native fixture: unchanged Bun/Turbo/Vite/Convex launch succeeds; real browser validation passes with the optional `agent-browser` harness only.
 - Remote: default region and `aws-eu-west-1` production lifecycle passes with exact cleanup.
 - Binaries: static ELF Linux amd64/arm64 and Mach-O macOS amd64/arm64 build with the expected Go module set. Only the Linux/amd64 artifact was executed (`eve 0.1.0`).

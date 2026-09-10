@@ -8,14 +8,15 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 Linux evidence now covers unchanged Bun/Turbo/Vite/Convex start/stop lifecycles, inherited defaults, finite expiry/cleanup, a 31-minute elapsed TTL, default and `aws-eu-west-1` backends, and real browser-rendered EVE configuration. Physical macOS/Apple ARM runtime remains the separate release gate; QEMU Linux/arm64 smoke evidence exists but is emulated.
 
-The guarded CLI supports `init`, `plan`, `create`, `path`, `status --refresh`, `resume`, additive and extra-endpoint `sync`, `list`, `doctor --remote`, bounded `gc`, `destroy`, and Convex credential login/logout. Interactive creation prompts for typed `yes` on a TTY while JSON remains non-interactive.
+The guarded CLI supports guided/incremental `init --convex`, `plan`, create phase timings, `path`, `status --refresh`, `resume`, additive and extra-endpoint `sync`, `list`, `doctor --remote`, bounded `gc`, `destroy`, and Convex credential login/status/logout. Interactive creation prompts for typed `yes` on a TTY while JSON remains non-interactive.
 
 Interactive creation shows a preview and asks for typed `yes`; automation uses flags/JSON without prompting:
 
 ```sh
 eve --version
 eve create --yes feature/payments       # branch worktree, reservations, native files
-eve init [--dry-run] [--write --yes --project team:slug]
+eve init [--convex --project team:project [--profile name]] [--write --yes]
+eve init --update [--convex [--backend-path path]] [--write --yes]
 eve plan feature/payments
 eve path feature/payments
 eve status feature/payments [--refresh]
@@ -32,6 +33,7 @@ eve auth convex logout [--profile name]
 Repeating `create` on a prepared branch returns its existing workspace without mutation; incomplete operations require `resume`.
 Interactive auth hides input by default; `--token-stdin` remains the automation path.
 
+`init --convex` discovers backend consumers from exact file/key evidence without executing dotenv values or project code. It writes an ordinary reviewable v1 manifest; updates reuse the committed manifest and preserve existing declarations. Convex development defaults remain the source for shared backend defaults and secrets—EVE does not clone them into the manifest. Create JSON includes phase timings for intent, reservations, Git, provider calls, file staging, publication and total preparation.
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
