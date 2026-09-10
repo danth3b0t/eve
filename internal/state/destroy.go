@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"eve/internal/domain"
@@ -28,27 +29,73 @@ func readDestroyStep(ctx context.Context, tx *sql.Tx, id string) (DestroyStep, e
 	}
 	step.Workspace = w
 	var git string
-	err = tx.QueryRowContext(ctx, `SELECT o.id,s.outcome_metadata_json FROM operations o JOIN operation_steps s ON s.operation_id=o.id AND s.sequence=1 AND s.action='git_worktree' WHERE o.workspace_id=? AND o.command='create' AND s.state='succeeded'`, id).Scan(&step.CreateOperationID, &git)
-	if err != nil || json.Unmarshal([]byte(git), &step.Identity) != nil || !validID(step.CreateOperationID) || step.Identity.Path != w.Path || step.Identity.PathIdentity == "" || step.Identity.AdminIdentity == "" {
-		return step, failure("E_STATE_INTENT", "recorded Git identity is unavailable for destruction")
+	identityErr := tx.QueryRowContext(ctx, `SELECT o.id,s.outcome_metadata_json FROM operations o JOIN operation_steps s ON s.operation_id=o.id AND s.sequence=1 AND s.action='git_worktree' WHERE o.workspace_id=? AND o.command='create' AND s.state='succeeded'`, id).Scan(&step.CreateOperationID, &git)
+	hasIdentity := false
+	if identityErr == nil {
+		hasIdentity = json.Unmarshal([]byte(git), &step.Identity) == nil && validID(step.CreateOperationID) && step.Identity.Path == w.Path && step.Identity.PathIdentity != "" && step.Identity.AdminIdentity != ""
+		if !hasIdentity {
+			return step, failure("E_STATE_INTENT", "recorded Git identity is invalid")
+		}
+	} else if !errors.Is(identityErr, sql.ErrNoRows) {
+		return step, identityErr
 	}
-	step.State = "ready"
+
+	latestCreate := func() (string, error) {
+		var latest string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE workspace_id=? AND command='create' ORDER BY created_at_ms DESC LIMIT 1`, id).Scan(&latest)
+		if err != nil {
+			return "", failure("E_STATE_INTENT", "recorded create operation is unavailable")
+		}
+		return latest, nil
+	}
+	if w.State == "destroying" && w.Phase == "remove_local" && w.OperationID != "" {
+		err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE id=? AND workspace_id=? AND command='destroy' AND state='inflight' AND phase='remove_local'`, w.OperationID, id).Scan(&step.OperationID)
+		if err != nil {
+			return step, failure("E_STATE_INTENT", "destroy operation state is incomplete")
+		}
+		if hasIdentity {
+			step.State = "inflight"
+			return step, nil
+		}
+		if step.CreateOperationID = w.OperationID; validID(step.CreateOperationID) {
+			if latest, err := latestCreate(); err == nil {
+				step.CreateOperationID = latest
+			} else {
+				return step, err
+			}
+		}
+		step.State = "pre_git_inflight"
+		return step, nil
+	}
+
 	if w.State == "prepared" && w.Phase == "complete" && w.Generation >= 1 && w.OperationID == "" {
+		if !hasIdentity {
+			return step, failure("E_STATE_INTENT", "recorded Git identity is unavailable for destruction")
+		}
+		step.State = "ready"
 		return step, nil
 	}
 	if w.State == "cleanup_pending" && w.Phase == "claim_release" {
+		if !hasIdentity {
+			return step, failure("E_STATE_INTENT", "recorded Git identity is unavailable for cleanup")
+		}
 		step.State = "cleanup_pending"
 		return step, nil
 	}
-	if w.State != "destroying" || w.Phase != "remove_local" || w.OperationID == "" {
-		return step, failure("E_DESTROY_STATE", "workspace is not eligible for the implemented local destroy path")
+	if (w.State == "creating" || w.State == "failed") && !hasIdentity {
+		var command string
+		if err := tx.QueryRowContext(ctx, `SELECT command FROM operations WHERE id=? AND workspace_id=? AND state NOT IN ('succeeded','cancelled')`, w.OperationID, id).Scan(&command); err != nil || command != "create" {
+			return step, failure("E_DESTROY_STATE", "pre-Git workspace cannot be abandoned safely")
+		}
+		step.CreateOperationID = w.OperationID
+		step.State = "pre_git_ready"
+		return step, nil
 	}
-	err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE id=? AND workspace_id=? AND command='destroy' AND state='inflight' AND phase='remove_local'`, w.OperationID, id).Scan(&step.OperationID)
-	if err != nil {
-		return step, failure("E_STATE_INTENT", "destroy operation state is incomplete")
+	if hasIdentity && (w.State == "creating" || w.State == "failed" || w.State == "syncing") {
+		step.State = "ready"
+		return step, nil
 	}
-	step.State = "inflight"
-	return step, nil
+	return step, failure("E_DESTROY_STATE", "workspace is not eligible for the exact destroy path")
 }
 func (w *LockedWorkspace) DestroyStep(ctx context.Context) (DestroyStep, error) {
 	var step DestroyStep
@@ -56,6 +103,29 @@ func (w *LockedWorkspace) DestroyStep(ctx context.Context) (DestroyStep, error) 
 		return w.store.transaction(ctx, func(tx *sql.Tx) error { var err error; step, err = readDestroyStep(ctx, tx, w.id); return err })
 	})
 	return step, err
+}
+
+// GitIdentityReceipt reads Git evidence without implying the workspace is
+// eligible for mutation or cleanup.
+func (w *LockedWorkspace) GitIdentityReceipt(ctx context.Context) (domain.GitIdentity, error) {
+	var raw string
+	var path string
+	err := w.withLock(func() error {
+		return w.store.transaction(ctx, func(tx *sql.Tx) error {
+			if err := tx.QueryRowContext(ctx, `SELECT s.outcome_metadata_json,w.path FROM operation_steps s JOIN operations o ON o.id=s.operation_id JOIN workspaces w ON w.id=o.workspace_id WHERE o.workspace_id=? AND o.command='create' AND s.action='git_worktree' AND s.state='succeeded'`, w.id).Scan(&raw, &path); err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return domain.GitIdentity{}, err
+	}
+	var identity domain.GitIdentity
+	if json.Unmarshal([]byte(raw), &identity) != nil || identity.Path != path || identity.PathIdentity == "" || identity.AdminIdentity == "" {
+		return domain.GitIdentity{}, failure("E_STATE_INTENT", "recorded Git identity is invalid")
+	}
+	return identity, nil
 }
 
 // OwnedFile returns only ownership metadata needed to compare a current tracked
@@ -78,11 +148,14 @@ func (w *LockedWorkspace) StartDestroy(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if step.State != "ready" {
+			if step.State != "ready" && step.State != "pre_git_ready" {
 				return failure("E_DESTROY_STATE", "reconcile the existing destroy operation")
 			}
 			operationID := uuid.NewString()
 			now := time.Now().UnixMilli()
+			if _, err := tx.ExecContext(ctx, `UPDATE operations SET state='cancelled',phase='superseded_by_destroy',updated_at_ms=?,finished_at_ms=? WHERE workspace_id=? AND state NOT IN ('succeeded','cancelled')`, now, now, w.id); err != nil {
+				return err
+			}
 			intent, _ := json.Marshal(struct {
 				Workspace, Branch, Path string
 				Generation              int
@@ -134,7 +207,7 @@ func (w *LockedWorkspace) RecordDestroyed(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if step.State != "inflight" && step.State != "cleanup_pending" {
+			if step.State != "inflight" && step.State != "cleanup_pending" && step.State != "pre_git_inflight" {
 				return failure("E_DESTROY_STATE", "no removal result is ready to finalize")
 			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM endpoints WHERE workspace_id=?`, w.id); err != nil {
@@ -147,7 +220,7 @@ func (w *LockedWorkspace) RecordDestroyed(ctx context.Context) error {
 				return err
 			}
 			now := time.Now().UnixMilli()
-			if step.State == "inflight" {
+			if step.State == "inflight" || step.State == "pre_git_inflight" {
 				if _, err := tx.ExecContext(ctx, `UPDATE operation_steps SET state='succeeded',finished_at_ms=? WHERE operation_id=? AND sequence=0`, now, step.OperationID); err != nil {
 					return err
 				}

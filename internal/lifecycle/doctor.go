@@ -42,9 +42,20 @@ func DoctorWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspa
 	}
 	result := DoctorResult{Workspace: workspace}
 	result.Checks = append(result.Checks, doctorCheck("registry", "pass", "workspace and generation are recorded"))
-	identity, err := destroyStepIdentity(ctx, lock)
-	if err != nil {
-		return result, err
+	identity, identityErr := lock.GitIdentityReceipt(ctx)
+	if identityErr != nil {
+		result.Checks = append(result.Checks, doctorCheck("git", "warning", workspaceGitEvidence(workspace)), doctorCheck("files", "not_checked", "no completed Git identity receipt is recorded yet"))
+		result, err = doctorEndpoints(ctx, s, result, workspace)
+		if err != nil {
+			return result, err
+		}
+		checks, err := doctorResources(ctx, lock, workspace)
+		if err != nil {
+			return result, err
+		}
+		result.Checks = append(result.Checks, checks...)
+		result.Checks = append(result.Checks, doctorCheck("runtime", "not_checked", "doctor never launches the project"), doctorCheck("loader", "not_checked", "static inspection cannot prove arbitrary launch behavior"), doctorCheck("provider_remote", "not_checked", "--remote was not requested"))
+		return result, nil
 	}
 	result, err = doctorGit(ctx, s, g, result, identity, workspace)
 	if err != nil {
@@ -66,12 +77,11 @@ func DoctorWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspa
 	result.Checks = append(result.Checks, doctorCheck("runtime", "not_checked", "doctor never launches the project"), doctorCheck("loader", "not_checked", "static inspection cannot prove arbitrary launch behavior"), doctorCheck("provider_remote", "not_checked", "--remote was not requested"))
 	return result, nil
 }
-func destroyStepIdentity(ctx context.Context, lock *state.LockedWorkspace) (domain.GitIdentity, error) {
-	step, err := lock.DestroyStep(ctx)
-	if err != nil {
-		return domain.GitIdentity{}, err
+func workspaceGitEvidence(workspace state.Workspace) string {
+	if workspace.State == "creating" || workspace.State == "failed" {
+		return "worktree creation has not produced a verified receipt yet"
 	}
-	return step.Identity, nil
+	return "recorded Git identity is unavailable; retrieve or reconcile the create journal before file checks"
 }
 func doctorGit(ctx context.Context, s *state.Store, g *git.Client, result DoctorResult, identity domain.GitIdentity, workspace state.Workspace) (DoctorResult, error) {
 	checkout, err := g.Verify(ctx, identity)

@@ -59,6 +59,53 @@ func ownedEdit(ctx context.Context, s *state.Store, w *state.LockedWorkspace, st
 	}, nil
 }
 
+func preGitDestroySafety(ctx context.Context, s *state.Store, g *git.Client, step state.DestroyStep, opts DestroyOptions) (*domain.GitIdentity, git.RemovalCheck, error) {
+	repo, err := s.Repository(ctx, step.Workspace.RepositoryID)
+	if err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	source, err := registeredSource(ctx, s, g, repo)
+	if err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	if step.Workspace.Path == source.Identity.Path || step.Workspace.Path == repo.CommonDir {
+		return nil, git.RemovalCheck{}, &domain.Error{Code: "E_GIT_OWNERSHIP", Message: "recorded pre-Git path overlaps the source"}
+	}
+	if err := outsideState(s, source); err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	allocation, err := s.Allocation(ctx, step.Workspace.ID)
+	if err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	if err := ports.CheckStopped(ctx, allocation, opts.Probe, opts.AssumeStopped); err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	_, pathErr := os.Lstat(step.Workspace.Path)
+	if errors.Is(pathErr, os.ErrNotExist) {
+		return nil, git.RemovalCheck{Warning: "A partial pre-Git checkout directory is absent; Git metadata is not broadly pruned."}, nil
+	}
+	if pathErr != nil {
+		return nil, git.RemovalCheck{}, &domain.Error{Code: "E_GIT_RECONCILE", Message: "recorded pre-Git path is inaccessible, not proven absent", Path: step.Workspace.Path}
+	}
+	checkout, err := g.Inspect(ctx, step.Workspace.Path)
+	if err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	identity := checkout.Identity
+	if identity.CommonIdentity != repo.CommonIdentity || checkout.Branch != step.Workspace.Branch || checkout.HeadOID != step.Workspace.HeadOID {
+		return nil, git.RemovalCheck{}, &domain.Error{Code: "E_GIT_IDENTITY", Message: "pre-Git checkout no longer matches durable creation intent", Path: step.Workspace.Path}
+	}
+	if err := g.Compatible(ctx, checkout); err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	reference, err := git.CreationReference(step.CreateOperationID)
+	if err != nil {
+		return nil, git.RemovalCheck{}, err
+	}
+	check, err := g.CheckRemoval(ctx, identity, step.Workspace.Branch, reference, git.RemovalOptions{DiscardChanges: opts.DiscardChanges})
+	return &identity, check, err
+}
 func destroySafety(ctx context.Context, s *state.Store, g *git.Client, step state.DestroyStep, opts DestroyOptions, owned func(string) (bool, error)) (git.RemovalCheck, error) {
 	r, err := s.Repository(ctx, step.Workspace.RepositoryID)
 	if err != nil {
@@ -106,7 +153,45 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if !opts.Approved {
 		return DestroyResult{}, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "destroy requires explicit approval; no local mutation was started"}
 	}
-	if step.State == "ready" && step.Workspace.Generation == 1 {
+	if step.State == "pre_git_ready" || step.State == "pre_git_inflight" {
+		identity, check, err := preGitDestroySafety(ctx, s, g, step, opts)
+		if err != nil {
+			return DestroyResult{}, err
+		}
+		if step.State == "pre_git_ready" {
+			if err := w.StartDestroy(ctx); err != nil {
+				return DestroyResult{}, err
+			}
+			if step, err = w.DestroyStep(ctx); err != nil {
+				return DestroyResult{}, err
+			}
+		}
+		if identity != nil {
+			if _, _, err := preGitDestroySafety(ctx, s, g, step, opts); err != nil {
+				return DestroyResult{}, err
+			}
+		}
+		if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
+			return DestroyResult{}, err
+		}
+		if identity != nil {
+			scratch, err := s.ScratchDir()
+			if err != nil {
+				return DestroyResult{}, err
+			}
+			reference, err := git.CreationReference(step.CreateOperationID)
+			if err != nil {
+				return DestroyResult{}, err
+			}
+			if err := g.Remove(ctx, *identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges}); err != nil {
+				return DestroyResult{}, err
+			}
+		}
+		result, err := finishDestroy(ctx, s, g, w, step)
+		result.Warning = check.Warning
+		return result, err
+	}
+	if step.State == "ready" && step.Workspace.State == "prepared" && step.Workspace.Generation == 1 {
 		// Reconcile any delayed create-image snapshot purge before retaining fingerprints.
 		if _, err := PublishFiles(ctx, s, g, w); err != nil {
 			return DestroyResult{}, err

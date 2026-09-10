@@ -44,8 +44,14 @@ func destroyResources(ctx context.Context, s *state.Store, w *state.LockedWorksp
 		if r.State == "deleted" {
 			continue
 		}
-		if r.State != "configured" && r.State != "deleting" && r.State != "cleanup_pending" {
-			return &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "resource does not have a complete destruction identity"}
+		if r.State == "planned" {
+			if err := w.MarkResource(ctx, r.ID, "deleted"); err != nil {
+				return err
+			}
+			continue
+		}
+		if r.State != "provisioning" && r.State != "unknown" && r.State != "failed" && r.State != "provisioned" && r.State != "configuring" && r.State != "configured" && r.State != "deleting" && r.State != "cleanup_pending" {
+			return &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "resource does not have a reconcileable destruction identity"}
 		}
 		_, token, err := managementCredential(ctx, s, r.Spec.Profile)
 		if err != nil {
@@ -69,6 +75,28 @@ func destroyResources(ctx context.Context, s *state.Store, w *state.LockedWorksp
 		if strconv.FormatInt(project.ID, 10) != r.RemoteProjectID {
 			return &domain.Error{Code: "E_PROVIDER_IDENTITY", Message: "recorded project identity changed; remote deletion refused"}
 		}
+		attemptStart := r.AttemptStartedAtMS
+		if attemptStart == 0 {
+			attemptStart = workspace.CreatedAtMS
+		}
+		if r.State == "provisioning" || r.State == "unknown" || r.State == "failed" {
+			lookup := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: attemptStart, ExpiresMS: r.IntendedExpiresAtMS}
+			deployment, found, err := api.Lookup(ctx, lookup)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return &domain.Error{Code: "E_PROVIDER_AMBIGUOUS", Message: "resource creation outcome is not proven; remote deletion refused"}
+			}
+			r.RemoteID = strconv.FormatInt(deployment.ID, 10)
+			r.RemoteName = deployment.Name
+			r.RemoteProjectID = strconv.FormatInt(deployment.ProjectID, 10)
+			r.ExpiresAtMS = deployment.ExpiresAt
+			r.State = "provisioned"
+			if err := w.RecordResource(ctx, r); err != nil {
+				return err
+			}
+		}
 		observed, err := recordedDeployment(r)
 		if err != nil {
 			return err
@@ -76,7 +104,7 @@ func destroyResources(ctx context.Context, s *state.Store, w *state.LockedWorksp
 		if err := w.MarkResource(ctx, r.ID, "deleting"); err != nil {
 			return err
 		}
-		intent := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: workspace.CreatedAtMS, ExpiresMS: r.IntendedExpiresAtMS}
+		intent := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: attemptStart, ExpiresMS: r.IntendedExpiresAtMS}
 		if err := api.Delete(ctx, intent, observed); err != nil {
 			var d *domain.Error
 			if !(errors.As(err, &d) && d.Code == "E_PROVIDER_NOT_FOUND") {
