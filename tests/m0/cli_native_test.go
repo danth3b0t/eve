@@ -149,8 +149,8 @@ func TestCLILocalLifecycleNativeFrontends(t *testing.T) {
 	}
 	assertFrontends(t, processes[1], values[1])
 	processes[1].stop()
-	if command := f.run(t, "git", "branch", "--list", "cli-a"); command == "" {
-		t.Fatal("destroy removed its branch")
+	if command := f.run(t, "git", "branch", "--list", "cli-a"); command != "" {
+		t.Fatal("destroy retained a still-identical EVE-created branch")
 	}
 	f.unchanged(t)
 	worktrees[1].unchanged(t)
