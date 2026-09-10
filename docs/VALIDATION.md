@@ -83,6 +83,7 @@ Production `eve` now provisions and destroys exact nondefault Convex dev deploym
 A 96.91-second `aws-eu-west-1` production run also passed and left no resources. Browser validation passed with `agent-browser` 0.16.3 against EVE-generated worktrees. Offline tests cover sanitized provider failures, exact-reference reconciliation after an ambiguous create, protected deploy-key storage, native selectors, public frontend URLs, remote env selection, remote/local cleanup and secret purge. macOS remains the open platform gate.
 TTL evidence now includes an actual elapsed 31-minute deployment in 1872 seconds, preserving the worktree until explicit destroy; a 2-minute TTL failed validation without aliasing. One boundary-error deployment was verified/deleted by exactly its name; no residue remains.
 Authentication now opens a hidden read on interactive terminals and rejects non-TTY login input unless `--token-stdin` is explicit; unit tests cover normalization, non-TTY refusal, cancellation and secret-free errors.
+Credential sign-out removes local secret/profile references only after matching checksum metadata; SQL and private tests confirm absent secrets, missing profiles, and no provider mutation.
 
 ## M3 initial resume
 

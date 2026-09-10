@@ -26,6 +26,7 @@ eve list [--all]
 eve doctor [feature/payments] [--remote]
 eve gc [--apply]
 eve auth convex login --project team:slug [--token-stdin]
+eve auth convex logout [--profile name]
 ```
 
 Repeating `create` on a prepared branch returns its existing workspace without mutation; incomplete operations require `resume`.
