@@ -18,7 +18,7 @@ eve create --yes feature/payments       # branch worktree, reservations, native 
 eve init [--dry-run] [--write --yes --project team:slug]
 eve plan feature/payments
 eve path feature/payments
-eve status feature/payments
+eve status feature/payments [--refresh]
 eve resume feature/payments
 eve sync feature/payments          # stop the ordinary project launcher first
 eve destroy --yes feature/payments    # stop the ordinary project launcher first

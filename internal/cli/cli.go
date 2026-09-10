@@ -40,6 +40,7 @@ type output struct {
 	Plan            *lifecycle.PlanPreview  `json:"plan,omitempty"`
 	Doctor          *lifecycle.DoctorResult `json:"doctor,omitempty"`
 	Init            *initPreview            `json:"init,omitempty"`
+	Remote          []lifecycle.DoctorCheck `json:"remote,omitempty"`
 	Repositories    []repositoryGroup       `json:"repositories,omitempty"`
 	GC              []gcCandidate           `json:"gc_candidates,omitempty"`
 	Auth            map[string]string       `json:"auth,omitempty"`
@@ -499,8 +500,12 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 		command = "path"
 	}
 	fs, _ := newFlags(command)
+	refresh := fs.Bool("refresh", false, "add read-only provider identity checks")
 	if err := fs.Parse(args); err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid " + command + " options"}
+	}
+	if *refresh && pathOnly {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "--refresh is valid only for status"}
 	}
 	if fs.NArg() > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: command + " accepts at most one workspace"}
@@ -509,7 +514,7 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	if fs.NArg() == 1 {
 		selector = fs.Arg(0)
 	}
-	g, s, err := storeFor(ctx, false)
+	g, s, err := storeFor(ctx, *refresh)
 	if err != nil {
 		return nil, err
 	}
@@ -537,15 +542,30 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	}
 	response.setResources(resourceRows)
 	configuration := "incomplete"
-	if workspaceInfo.State == "prepared" && workspaceInfo.Generation == 1 {
+	if workspaceInfo.State == "prepared" && workspaceInfo.Generation >= 1 {
 		configuration = "verified"
 	}
 	data := "no_workspace_data_by_eve"
 	if len(resourceRows) != 0 {
 		data = "provider_empty_initial_state"
 	}
+	if *refresh {
+		lock, err := s.LockWorkspace(workspaceInfo.ID)
+		if err != nil {
+			return nil, err
+		}
+		remoteChecks, remoteErr := lifecycle.DoctorRemote(ctx, s, lock, workspaceInfo, nil)
+		closeErr := lock.Close()
+		if closeErr != nil && remoteErr == nil {
+			remoteErr = closeErr
+		}
+		if remoteErr != nil {
+			return nil, remoteErr
+		}
+		response.Remote = remoteChecks
+	}
 	response.Verification = &verification{Configuration: configuration, Runtime: "not_checked", Code: "not_verified_by_eve", Data: data}
-	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows))
+	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows), remoteHuman(response.Remote))
 	return response, nil
 }
 func list(ctx context.Context, args []string) (*output, error) {
@@ -973,6 +993,18 @@ func resourcesHuman(rows []state.Resource) string {
 		lines = append(lines, fmt.Sprintf("  %s: %s %s expires=%s\n", row.ResourceKey, row.Provider, row.RemoteName, row.Outputs["expires_at"]))
 	}
 	return strings.Join(lines, "")
+}
+
+func remoteHuman(checks []lifecycle.DoctorCheck) string {
+	if len(checks) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("provider remote:\n")
+	for _, check := range checks {
+		fmt.Fprintf(&out, "  %-8s %s: %s\n", check.Status, check.ID, check.Evidence)
+	}
+	return out.String()
 }
 func servicesHuman(a state.Allocation) string {
 	if len(a.Endpoints) == 0 {

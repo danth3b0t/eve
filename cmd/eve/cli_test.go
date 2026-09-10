@@ -205,6 +205,10 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	code, stdout, _, status := command(t, binary, root, base, "status", "--json", "payments")
 	if code != 0 || !status.OK || status.Services["web"].Port == 0 || status.Workspace.State != "prepared" {
 		t.Fatalf("status: %d %s", code, stdout)
+		refreshCode, refreshOut, _, refresh := command(t, binary, root, base, "status", "--json", "--refresh", "payments")
+		if refreshCode != 0 || !refresh.OK || !strings.Contains(string(refreshOut), `"remote":[{"id":"provider_remote","status":"not_checked"`) {
+			t.Fatalf("status refresh: %d %s", refreshCode, refreshOut)
+		}
 	}
 	doctorCode, doctorOut, _, doctor := command(t, binary, root, base, "doctor", "--json", "payments")
 	if doctorCode != 0 || !doctor.OK || !strings.Contains(string(doctorOut), `"status":"pass"`) || !strings.Contains(string(doctorOut), `"status":"not_checked"`) {

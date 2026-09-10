@@ -97,7 +97,7 @@ Additive key/extra-endpoint `sync` runs local and Git drift checks before any re
 
 Read-only `eve list [--all]` reports registered repositories, live workspaces, public ports and public Convex metadata without creating locks, credentials, files or remote calls. CLI tests confirm the same workspace appears with its assigned port and disappears from the default report after exact destruction. Broader framework discovery remains limited.
 `eve init` is restricted to the proven committed Bun/Vite/Convex pattern. Unsupported layouts refuse; its dry run mutates nothing and `--write --yes` creates an exclusive `0600` manifest that then passes `plan` after manual review/commit.
-`eve doctor` verifies registry/Git/current file HMACs, endpoint availability, resource expiry and optional exact remote identity while leaving runtime/loader unread. Tests cover drift warnings and remote identity without environment/key queries.
+`eve doctor` checks registry/Git/current file HMACs, endpoint availability, resource expiry and optional exact remote identity while leaving runtime/loader unread. `status --refresh` uses that read-only identity path without env/key access; tests cover drift warnings and provider-resource remote verification.
 `eve plan` independently evaluates the committed target before registration/mutation; CLI evidence confirms no registry database or worktrees are created and no ports/providers are exercised.
 Interactive `create` now prints a committed-target review and requires typed `yes`; pure noninteractive, JSON and refusal paths are tested with no registry mutation.
 ## M5 packaging foundation
