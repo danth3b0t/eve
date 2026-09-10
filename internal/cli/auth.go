@@ -23,11 +23,23 @@ func auth(ctx context.Context, args []string) (*output, error) {
 	if args[1] == "logout" {
 		return authLogout(ctx, args[2:])
 	}
+	return authLogin(ctx, args[2:], func(ctx context.Context, token, project string) (convex.Project, error) {
+		api, err := convex.New(token, nil)
+		if err != nil {
+			return convex.Project{}, err
+		}
+		return api.ValidateProject(ctx, project)
+	})
+}
+
+type authProjectValidator func(context.Context, string, string) (convex.Project, error)
+
+func authLogin(ctx context.Context, args []string, validate authProjectValidator) (*output, error) {
 	fs, _ := newFlags("auth")
 	profile := fs.String("profile", "default", "credential profile name")
 	stdin := fs.Bool("token-stdin", false, "read token from standard input instead of the hidden interactive prompt")
 	project := fs.String("project", "", "explicit team:project binding to validate")
-	positional, err := parseCommandFlags(fs, args[2:])
+	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid auth options"}
 	}
@@ -38,11 +50,7 @@ func auth(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	api, err := convex.New(token, nil)
-	if err != nil {
-		return nil, err
-	}
-	identity, err := api.ValidateProject(ctx, *project)
+	identity, err := validate(ctx, token, *project)
 	if err != nil {
 		return nil, err
 	}
