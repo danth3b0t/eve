@@ -59,11 +59,6 @@ func syncWorkspaceLocked(ctx context.Context, s *state.Store, g *git.Client, loc
 	if err != nil {
 		return SyncResult{}, err
 	}
-	repoLock, err := s.LockRepository(step.Workspace.RepositoryID)
-	if err != nil {
-		return SyncResult{}, err
-	}
-	defer repoLock.Close()
 	if step.State == "complete" {
 		if _, err := completeSyncCleanup(ctx, s, lock, step); err != nil {
 			return SyncResult{}, err

@@ -225,11 +225,6 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if err != nil {
 		return DestroyResult{}, err
 	}
-	repoLock, err := s.LockRepository(r.ID)
-	if err != nil {
-		return DestroyResult{}, err
-	}
-	defer repoLock.Close()
 	owned, err := ownedEdit(ctx, s, w, step)
 	if err != nil {
 		return DestroyResult{}, err
@@ -246,22 +241,30 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 			return DestroyResult{}, err
 		}
 	}
-	// Recheck after persisting destruction intent; no SQL transaction is held.
-	if _, err := destroySafety(ctx, s, g, step, opts, owned); err != nil {
-		return DestroyResult{}, err
-	}
 	if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
 		return DestroyResult{}, err
 	}
-	scratch, err := s.ScratchDir()
-	if err != nil {
-		return DestroyResult{}, err
-	}
-	reference, err := git.CreationReference(step.CreateOperationID)
-	if err != nil {
-		return DestroyResult{}, err
-	}
-	err = g.Remove(ctx, step.Identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, RemoveBranch: step.NewBranch, ExpectedOID: step.Workspace.HeadOID, OwnedEdit: owned})
+	err = func() error {
+		// Only shared Git deletion uses the repository mutex; remote and file work
+		// remain under the workspace lock so independent operations can overlap.
+		repoLock, err := s.LockRepository(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		defer repoLock.Close()
+		if _, err := destroySafety(ctx, s, g, step, opts, owned); err != nil {
+			return err
+		}
+		scratch, err := s.ScratchDir()
+		if err != nil {
+			return err
+		}
+		reference, err := git.CreationReference(step.CreateOperationID)
+		if err != nil {
+			return err
+		}
+		return g.Remove(ctx, step.Identity, step.Workspace.Branch, reference, scratch, git.RemovalOptions{DiscardChanges: opts.DiscardChanges, RemoveBranch: step.NewBranch, ExpectedOID: step.Workspace.HeadOID, OwnedEdit: owned})
+	}()
 	if absent, absentErr := destroyedAbsence(step.Identity); absent && absentErr == nil {
 		journal, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

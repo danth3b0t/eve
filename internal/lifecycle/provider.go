@@ -64,11 +64,6 @@ func ProvisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 	})
 }
 func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWorkspace, manifestWorkspace state.Workspace, factory convexFactory) (bindingResult, error) {
-	repoLock, err := s.LockRepository(manifestWorkspace.RepositoryID)
-	if err != nil {
-		return bindingResult{}, err
-	}
-	defer repoLock.Close()
 	resources, err := w.Resources(ctx)
 	if err != nil {
 		return bindingResult{}, err

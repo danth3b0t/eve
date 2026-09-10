@@ -152,11 +152,6 @@ func PrepareGit(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 	if err != nil {
 		return domain.GitIdentity{}, err
 	}
-	repoLock, err := s.LockRepository(r.ID)
-	if err != nil {
-		return domain.GitIdentity{}, err
-	}
-	defer repoLock.Close()
 	source, err := registeredSource(ctx, s, g, r)
 	if err != nil {
 		return domain.GitIdentity{}, err
@@ -169,6 +164,11 @@ func PrepareGit(ctx context.Context, s *state.Store, g *git.Client, locked *stat
 	if err != nil {
 		return domain.GitIdentity{}, err
 	}
+	repoLock, err := s.LockRepository(ctx, r.ID)
+	if err != nil {
+		return domain.GitIdentity{}, err
+	}
+	defer repoLock.Close()
 	if step.State == "succeeded" {
 		if err := g.FinishCreation(ctx, *step.Identity, reference, scratch); err != nil {
 			return domain.GitIdentity{}, err

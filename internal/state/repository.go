@@ -81,14 +81,33 @@ func (s *Store) Repository(ctx context.Context, id string) (Repository, error) {
 	return r, nil
 }
 
-func (s *Store) LockRepository(id string) (*platform.Lock, error) {
+func (s *Store) LockRepository(ctx context.Context, id string) (*platform.Lock, error) {
 	if !validID(id) {
 		return nil, failure("E_ID_INVALID", "a full UUIDv4 is required")
 	}
 	if err := s.checkStorage(); err != nil {
 		return nil, err
 	}
-	return platform.WaitLock(filepath.Join(s.root, "locks", "repository-"+id+".lock"))
+	path := filepath.Join(s.root, "locks", "repository-"+id+".lock")
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		l, err := platform.TryLock(path)
+		if !errors.Is(err, platform.ErrLocked) {
+			return l, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, failure("E_REPOSITORY_BUSY", "another EVE repository Git mutation is in progress")
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func validID(id string) bool {

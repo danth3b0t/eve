@@ -41,11 +41,6 @@ func PublishFiles(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if err != nil {
 		return state.Workspace{}, err
 	}
-	lock, err := s.LockRepository(r.ID)
-	if err != nil {
-		return state.Workspace{}, err
-	}
-	defer lock.Close()
 	if _, err := registeredSource(ctx, s, g, r); err != nil {
 		return state.Workspace{}, err
 	}

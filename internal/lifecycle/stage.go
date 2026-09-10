@@ -34,11 +34,6 @@ func StageFilesWithBindings(ctx context.Context, s *state.Store, g *git.Client, 
 	if err != nil {
 		return state.FileStep{}, err
 	}
-	repoLock, err := s.LockRepository(r.ID)
-	if err != nil {
-		return state.FileStep{}, err
-	}
-	defer repoLock.Close()
 	if _, err := registeredSource(ctx, s, g, r); err != nil {
 		return state.FileStep{}, err
 	}
