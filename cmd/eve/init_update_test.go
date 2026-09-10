@@ -61,7 +61,7 @@ func TestConvexOnlyInitAndReviewedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, stdout, _, _ = command(t, binary, root, base, "init", "--update", "--write", "--yes", "--json", "--convex", "--project", "dev-team:m0")
+	code, stdout, _, _ = command(t, binary, root, base, "init", "--update", "--write", "--yes", "--json", "--convex")
 	if code != 0 || !strings.Contains(string(stdout), `"updated":true`) || !strings.Contains(string(stdout), `CUSTOM_BACKEND-`) {
 		t.Fatalf("incremental init update: %d %s", code, stdout)
 	}

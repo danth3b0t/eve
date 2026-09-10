@@ -88,6 +88,24 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 		return result, proposalProblem("E_INIT_DISCOVERY", "no Convex backend was identified; pass an explicit backend path after committing its convex.json/package evidence")
 	}
 	result.HasConvexBackend = backend != ""
+	if backend != "" && existing != nil && options.Project == "" {
+		matched := 0
+		for _, resource := range existing.Resources {
+			if resource.Provider == "convex" && resource.Path == backend {
+				matched++
+				if resource.Project == "" {
+					return result, proposalProblem("E_INIT_UPDATE", "existing backend requires its committed project binding before update")
+				}
+				options.Project = resource.Project
+				if options.CredentialProfile == "" {
+					options.CredentialProfile = resource.CredentialProfile
+				}
+			}
+		}
+		if matched > 1 {
+			return result, proposalProblem("E_INIT_AMBIGUOUS", "multiple existing resources use the discovered backend path")
+		}
+	}
 	if backend != "" {
 		result.Evidence = append(result.Evidence, "Convex package "+backend+" has convex.json and a convex dependency in package.json")
 		if err := validateInitProject(options.Project); err != nil {

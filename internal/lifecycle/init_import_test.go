@@ -115,6 +115,11 @@ port = "LEGACY_PORT"
 
 [services.legacy.env]
 CUSTOM_KEEP = "preserved"
+
+[resources.backend]
+provider = "convex"
+path = "packages/backend"
+project = "dev-team:m0"
 `
 	if err := os.MkdirAll(filepath.Join(r.root, "apps/legacy"), 0700); err != nil {
 		t.Fatal(err)
@@ -128,7 +133,7 @@ CUSTOM_KEEP = "preserved"
 	if err := os.WriteFile(filepath.Join(r.root, "apps/web/.env.local"), []byte(local), 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := ProposeInit(t.Context(), r.client, r.root, InitOptions{Project: "dev-team:m0", Convex: true, Update: true})
+	result, err := ProposeInit(t.Context(), r.client, r.root, InitOptions{Convex: true, Update: true})
 	if err != nil {
 		t.Fatal(err)
 	}
