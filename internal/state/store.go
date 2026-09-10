@@ -162,7 +162,16 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 		var version, count int
 		err := s.db.QueryRowContext(ctx, `SELECT max(version), count(*) FROM schema_migrations`).Scan(&version, &count)
-		if err != nil || version != schemas.StateVersion || count != 1 {
+		if err != nil || count != 1 {
+			return failure("E_STATE_SCHEMA", "unsupported state schema; use a compatible EVE version, not a new registry")
+		}
+		if version == 1 {
+			if err := s.migrateOneToTwo(ctx); err != nil {
+				return err
+			}
+			version = schemas.StateVersion
+		}
+		if version != schemas.StateVersion {
 			return failure("E_STATE_SCHEMA", "unsupported state schema; use a compatible EVE version, not a new registry")
 		}
 	}
@@ -176,6 +185,19 @@ func (s *Store) initialize(ctx context.Context) error {
 		return failure("E_STATE_FILESYSTEM", "SQLite WAL mode is required")
 	}
 	return nil
+}
+
+func (s *Store) migrateOneToTwo(ctx context.Context) error {
+	return s.transaction(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE workspaces ADD COLUMN applied_manifest_json TEXT CHECK (applied_manifest_json IS NULL OR json_valid(applied_manifest_json))`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE resources ADD COLUMN attempt_started_at_ms INTEGER`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE schema_migrations SET version=?,applied_at_ms=? WHERE version=1`, schemas.StateVersion, time.Now().UnixMilli())
+		return err
+	})
 }
 
 func (s *Store) checkStorage() error {

@@ -4,7 +4,7 @@ package schemas
 
 import _ "embed"
 
-const StateVersion = 1
+const StateVersion = 2
 
 //go:embed state-schema.sql
 var StateSQL string

@@ -32,6 +32,7 @@ CREATE TABLE workspaces (
     git_admin_dir TEXT,
     head_oid TEXT NOT NULL,
     manifest_json TEXT NOT NULL CHECK (json_valid(manifest_json)),
+    applied_manifest_json TEXT CHECK (applied_manifest_json IS NULL OR json_valid(applied_manifest_json)),
     manifest_sha256 TEXT NOT NULL,
     generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
     state TEXT NOT NULL CHECK (state IN (
@@ -144,6 +145,7 @@ CREATE TABLE resources (
     intended_expires_at_ms INTEGER,
     expires_at_ms INTEGER,
     last_observed_at_ms INTEGER,
+    attempt_started_at_ms INTEGER,
     state TEXT NOT NULL CHECK (state IN (
         'planned','provisioning','unknown','provisioned','configuring','configured',
         'failed','expired','missing','deleting','cleanup_pending','deleted'
@@ -221,7 +223,7 @@ CREATE TABLE file_transactions (
 );
 
 INSERT INTO schema_migrations(version, applied_at_ms)
-VALUES (1, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+VALUES (2, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
 COMMIT;
 
 -- Do not update allocation rows in place: lifecycle operations insert/delete

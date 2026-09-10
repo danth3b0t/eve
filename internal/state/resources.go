@@ -29,6 +29,7 @@ type Resource struct {
 	CredentialID                               string
 	KeyGeneration                              int
 	IntendedExpiresAtMS, ExpiresAtMS           int64
+	AttemptStartedAtMS                         int64
 	State                                      string
 	Outputs                                    map[string]string
 	Ordered                                    int
@@ -89,7 +90,7 @@ func insertResourceRows(ctx context.Context, tx *sql.Tx, id string, m config.Man
 }
 
 func resourceQuery() string {
-	return `SELECT id,resource_key,provider,spec_json,remote_reference,coalesce(remote_project_id,''),coalesce(remote_id,''),coalesce(remote_name,''),coalesce(r.credential_id,''),coalesce(r.key_generation,0),coalesce(r.intended_expires_at_ms,0),coalesce(r.expires_at_ms,0),r.state,outputs_json,rowid FROM resources r WHERE workspace_id=? ORDER BY rowid`
+	return `SELECT id,resource_key,provider,spec_json,remote_reference,coalesce(remote_project_id,''),coalesce(remote_id,''),coalesce(remote_name,''),coalesce(r.credential_id,''),coalesce(r.key_generation,0),coalesce(r.intended_expires_at_ms,0),coalesce(r.expires_at_ms,0),coalesce(r.attempt_started_at_ms,0),r.state,outputs_json,rowid FROM resources r WHERE workspace_id=? ORDER BY rowid`
 }
 
 func (w *LockedWorkspace) Resources(ctx context.Context) ([]Resource, error) {
@@ -116,7 +117,7 @@ func readResources(ctx context.Context, q queryer, id string) ([]Resource, error
 	for result.Next() {
 		var r Resource
 		var spec, outs string
-		if err := result.Scan(&r.ID, &r.ResourceKey, &r.Provider, &spec, &r.RemoteReference, &r.RemoteProjectID, &r.RemoteID, &r.RemoteName, &r.CredentialID, &r.KeyGeneration, &r.IntendedExpiresAtMS, &r.ExpiresAtMS, &r.State, &outs, &r.Ordered); err != nil {
+		if err := result.Scan(&r.ID, &r.ResourceKey, &r.Provider, &spec, &r.RemoteReference, &r.RemoteProjectID, &r.RemoteID, &r.RemoteName, &r.CredentialID, &r.KeyGeneration, &r.IntendedExpiresAtMS, &r.ExpiresAtMS, &r.AttemptStartedAtMS, &r.State, &outs, &r.Ordered); err != nil {
 			return rows, err
 		}
 		if json.Unmarshal([]byte(spec), &r.Spec) != nil || json.Unmarshal([]byte(outs), &r.Outputs) != nil || r.State == "" {
@@ -176,7 +177,7 @@ func (w *LockedWorkspace) RecordResource(ctx context.Context, r Resource) error 
 			if r.CredentialID != "" {
 				credential = r.CredentialID
 			}
-			result, err := tx.ExecContext(ctx, `UPDATE resources SET remote_project_id=?,remote_id=?,remote_name=?,credential_id=?,key_generation=?,intended_expires_at_ms=?,expires_at_ms=?,state=?,outputs_json=? WHERE id=? AND workspace_id=?`, r.RemoteProjectID, r.RemoteID, r.RemoteName, credential, r.KeyGeneration, r.IntendedExpiresAtMS, r.ExpiresAtMS, r.State, string(raw), r.ID, w.id)
+			result, err := tx.ExecContext(ctx, `UPDATE resources SET remote_project_id=?,remote_id=?,remote_name=?,credential_id=?,key_generation=?,intended_expires_at_ms=?,expires_at_ms=?,attempt_started_at_ms=?,state=?,outputs_json=? WHERE id=? AND workspace_id=?`, r.RemoteProjectID, r.RemoteID, r.RemoteName, credential, r.KeyGeneration, r.IntendedExpiresAtMS, r.ExpiresAtMS, r.AttemptStartedAtMS, r.State, string(raw), r.ID, w.id)
 			if err != nil {
 				return err
 			}

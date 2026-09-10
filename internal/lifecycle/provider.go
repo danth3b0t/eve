@@ -68,7 +68,18 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 	if err != nil {
 		return bindingResult{}, err
 	}
+	type preparedResource struct {
+		resource state.Resource
+		api      convexAdapter
+		deploy   convex.Deployment
+		key      string
+	}
 	result := bindingResult{outputs: map[string]resolve.ResourceOutputs{}, secrets: map[string]map[string]string{}}
+	prepared := make([]preparedResource, 0, len(resources))
+
+	// Phase one verifies all declared remote identities, creates/joins exact
+	// resources, and collects outputs. It never resolves a whole manifest while
+	// one of its resource siblings still lacks outputs.
 	for i := range resources {
 		r := resources[i]
 		if r.Provider != "convex" {
@@ -96,10 +107,16 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 				}
 			}
 		}
-		if strconv.FormatInt(project.ID, 10) != r.RemoteProjectID {
-			r.RemoteProjectID = strconv.FormatInt(project.ID, 10)
+		r.RemoteProjectID = strconv.FormatInt(project.ID, 10)
+		attemptStart := r.AttemptStartedAtMS
+		if r.State == "planned" && attemptStart == 0 {
+			attemptStart = time.Now().UnixMilli()
+			r.AttemptStartedAtMS = attemptStart
 		}
 		intent := convex.Intent{ProjectID: project.ID, Reference: r.RemoteReference, Region: r.Spec.Region, StartMS: manifestWorkspace.CreatedAtMS, ExpiresMS: r.IntendedExpiresAtMS}
+		if attemptStart != 0 {
+			intent.StartMS = attemptStart
+		}
 		d, err := provisionedDeployment(ctx, api, w, r, intent)
 		if err != nil {
 			markResourceFailure(w, r, err)
@@ -111,9 +128,6 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 			r.RemoteProjectID = strconv.FormatInt(d.ProjectID, 10)
 			r.ExpiresAtMS = d.ExpiresAt
 			r.State = "provisioned"
-			if err := w.MarkResource(context.Background(), r.ID, "provisioned"); err != nil {
-				return result, err
-			}
 			if err := w.RecordResource(ctx, r); err != nil {
 				return result, err
 			}
@@ -147,22 +161,26 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 		if err := w.RecordResource(ctx, r); err != nil {
 			return result, err
 		}
-		heat, err := s.Allocation(ctx, manifestWorkspace.ID)
-		if err != nil {
-			return result, err
-		}
-		resolverInput := localInputs(manifestWorkspace, heat)
-		resolverInput.Resources = result.outputs
-		resolved, err := resolve.Resolve(&manifestWorkspace.Manifest, resolverInput)
-		if err != nil {
-			return result, err
-		}
-		if err := configureResourceEnv(ctx, api, *d, key, resolved.RemoteEnv[r.ResourceKey]); err != nil {
-			markResourceFailure(w, r, err)
-			return result, err
-		}
 		secretPath := state.ResourceEnvFile(r)
 		result.secrets[secretPath] = map[string]string{"CONVEX_DEPLOYMENT": "dev:" + d.Name, "CONVEX_DEPLOY_KEY": key}
+		prepared = append(prepared, preparedResource{resource: r, api: api, deploy: *d, key: key})
+	}
+
+	// Phase two resolves relationships only after every sibling output exists.
+	heat, err := s.Allocation(ctx, manifestWorkspace.ID)
+	if err != nil {
+		return result, err
+	}
+	resolverInput := localInputs(manifestWorkspace, heat)
+	resolverInput.Resources = result.outputs
+	resolved, err := resolve.Resolve(&manifestWorkspace.Manifest, resolverInput)
+	if err != nil {
+		return result, err
+	}
+	for _, item := range prepared {
+		if err := configureResourceEnv(ctx, item.api, item.deploy, item.key, resolved.RemoteEnv[item.resource.ResourceKey]); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
@@ -195,11 +213,15 @@ func managementCredential(ctx context.Context, s *state.Store, profile string) (
 	return s.ManagementToken(ctx, "convex", profile)
 }
 func provisionedDeployment(ctx context.Context, api convexAdapter, w *state.LockedWorkspace, r state.Resource, in convex.Intent) (*convex.Deployment, error) {
+	attemptStart := r.AttemptStartedAtMS
+	if attemptStart == 0 {
+		attemptStart = in.StartMS // compatibility with v1 registries
+	}
 	if r.State == "provisioned" || r.State == "configuring" || r.State == "configured" {
-		if r.RemoteName == "" || r.RemoteID == "" || r.KeyGeneration < 0 || r.ExpiresAtMS != in.ExpiresMS {
+		if r.RemoteName == "" || r.RemoteID == "" || r.KeyGeneration < 0 || r.ExpiresAtMS != in.ExpiresMS || attemptStart == 0 {
 			return nil, &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "recorded resource identity is incomplete"}
 		}
-		// Re-read exact remote identity before using it; never infer it from reference.
+		in.StartMS = attemptStart
 		id, _ := strconv.ParseInt(r.RemoteID, 10, 64)
 		d, err := api.Inspect(ctx, in, convex.Deployment{ID: id, Name: r.RemoteName, ProjectID: in.ProjectID, Reference: r.RemoteReference})
 		if err != nil {
@@ -208,6 +230,10 @@ func provisionedDeployment(ctx context.Context, api convexAdapter, w *state.Lock
 		return &d, nil
 	}
 	if r.State == "provisioning" || r.State == "unknown" {
+		if attemptStart == 0 {
+			return nil, &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "resource attempt window is not recorded"}
+		}
+		in.StartMS = attemptStart
 		d, found, err := api.Lookup(ctx, in)
 		if err != nil {
 			return nil, err
@@ -223,12 +249,16 @@ func provisionedDeployment(ctx context.Context, api convexAdapter, w *state.Lock
 	if r.State != "planned" {
 		return nil, &domain.Error{Code: "E_PROVIDER_RESOURCE", Message: "resource is not in a retryable provisioning state"}
 	}
-	d, err := api.Create(ctx, in)
-	if err != nil {
-		markResourceFailure(w, r, err)
+	if r.AttemptStartedAtMS == 0 {
+		r.AttemptStartedAtMS = time.Now().UnixMilli()
+	}
+	r.State = "provisioning"
+	if err := w.RecordResource(ctx, r); err != nil {
 		return nil, err
 	}
-	if err := w.MarkResource(ctx, r.ID, "provisioning"); err != nil {
+	in.StartMS = r.AttemptStartedAtMS
+	d, err := api.Create(ctx, in)
+	if err != nil {
 		return nil, err
 	}
 	return d, nil
@@ -295,10 +325,12 @@ func deployCredential(ctx context.Context, s *state.Store, api convexAdapter, w 
 	return key.Value(), nil
 }
 func markResourceFailure(w *state.LockedWorkspace, r state.Resource, err error) {
-	code := "failed"
-	var d *domain.Error
-	if errors.As(err, &d) && d.Code == "E_PROVIDER_AMBIGUOUS" {
-		code = "unknown"
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		_ = w.MarkResource(context.Background(), r.ID, "unknown")
+		return
 	}
-	_ = w.MarkResource(context.Background(), r.ID, code)
+	var d *domain.Error
+	if errors.As(err, &d) && (d.Code == "E_PROVIDER_AMBIGUOUS" || d.Code == "E_PROVIDER_CONTRACT") {
+		_ = w.MarkResource(context.Background(), r.ID, "unknown")
+	}
 }

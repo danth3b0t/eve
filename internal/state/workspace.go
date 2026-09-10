@@ -80,9 +80,9 @@ type Workspace struct {
 	ManifestSHA256                          string
 	Generation                              int
 	CreatedAtMS                             int64
-	Manifest                                config.Manifest `json:"-"`
+	Manifest                                config.Manifest `json:"-"` // immutable creation manifest
+	AppliedManifest                         config.Manifest `json:"-"` // current applied generation
 }
-
 type createIntent struct {
 	Min, Max, Size int
 	NewBranch      bool
@@ -147,20 +147,28 @@ func (w *LockedWorkspace) BeginCreate(ctx context.Context, in CreateRequest) (st
 	return operationID, nil
 }
 
-const workspaceQuery = `SELECT w.id,w.repository_id,w.branch,w.path,w.head_oid,w.state,w.phase,w.manifest_sha256,w.generation,w.created_at_ms,w.manifest_json,coalesce((SELECT id FROM operations o WHERE o.workspace_id=w.id AND o.state NOT IN ('succeeded','cancelled')),'') FROM workspaces w WHERE w.id=?`
+const workspaceQuery = `SELECT w.id,w.repository_id,w.branch,w.path,w.head_oid,w.state,w.phase,w.manifest_sha256,w.generation,w.created_at_ms,w.manifest_json,w.applied_manifest_json,coalesce((SELECT id FROM operations o WHERE o.workspace_id=w.id AND o.state NOT IN ('succeeded','cancelled')),'') FROM workspaces w WHERE w.id=?`
 
 func scanWorkspace(row *sql.Row) (Workspace, error) {
 	var w Workspace
 	var manifest string
-	err := row.Scan(&w.ID, &w.RepositoryID, &w.Branch, &w.Path, &w.HeadOID, &w.State, &w.Phase, &w.ManifestSHA256, &w.Generation, &w.CreatedAtMS, &manifest, &w.OperationID)
+	var applied sql.NullString
+	err := row.Scan(&w.ID, &w.RepositoryID, &w.Branch, &w.Path, &w.HeadOID, &w.State, &w.Phase, &w.ManifestSHA256, &w.Generation, &w.CreatedAtMS, &manifest, &applied, &w.OperationID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return w, failure("E_WORKSPACE_NOT_FOUND", "workspace is not recorded in this registry")
+		return w, failure("E_WORKSPACE_NOT_FOUND", "workspace is not registered in this registry")
 	}
 	if err != nil {
 		return w, err
 	}
 	if err := json.Unmarshal([]byte(manifest), &w.Manifest); err != nil {
-		return Workspace{}, failure("E_STATE_INTENT", "stored manifest snapshot is invalid")
+		return Workspace{}, failure("E_STATE_INTENT", "stored creation manifest snapshot is invalid")
+	}
+	if !applied.Valid {
+		w.AppliedManifest = w.Manifest
+		return w, nil
+	}
+	if err := json.Unmarshal([]byte(applied.String), &w.AppliedManifest); err != nil {
+		return Workspace{}, failure("E_STATE_INTENT", "stored applied manifest is invalid")
 	}
 	return w, nil
 }
