@@ -18,7 +18,7 @@ import (
 )
 
 func TestConcurrentMachineKeyAndMissingKeyRefusal(t *testing.T) {
-	s, _ := fixture(t)
+	s, repo := fixture(t)
 	type result struct {
 		ref, mac string
 		err      error
@@ -57,11 +57,22 @@ func TestConcurrentMachineKeyAndMissingKeyRefusal(t *testing.T) {
 			t.Fatal("concurrent stores selected different machine keys")
 		}
 	}
+	w, id := begin(t, s, repo, "machine-key-dependent")
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := s.Workspace(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE operation_steps SET request_metadata_json=? WHERE operation_id=? AND sequence=0`, `{"KeyID":"`+want.ref+`"}`, workspace.OperationID); err != nil {
+		t.Fatal(err)
+	}
 	name := filepath.Join(s.root, "secrets", want.ref)
 	if err := os.Remove(name); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := s.HMACKey(t.Context())
+	_, _, err = s.HMACKey(t.Context())
 	code(t, err, "E_HMAC_KEY")
 	entries, err := os.ReadDir(filepath.Dir(name))
 	if err != nil || len(entries) != 0 {
@@ -99,7 +110,13 @@ func TestMachineKeyIntentBeforeWriteAndLostResponse(t *testing.T) {
 			}
 			got, key, err := s.HMACKey(t.Context())
 			if size != 32 {
-				code(t, err, "E_HMAC_KEY")
+				if err != nil || got == ref || key == nil {
+					t.Fatalf("independent incomplete bootstrap not repaired: %v", err)
+				}
+				again, againKey, err := s.HMACKey(t.Context())
+				if err != nil || again != got || againKey == nil {
+					t.Fatalf("repaired bootstrap not durable: %v", err)
+				}
 				return
 			}
 			if err != nil || got != ref || key.File("workspace", "env", []byte("PORT=1234\n")) != "0c76f2f655aefad9d24774e38ba00b955cc884b4d94396c24191a8c447a81229" {

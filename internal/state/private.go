@@ -126,11 +126,57 @@ func (s *Store) HMACKey(ctx context.Context) (string, *private.Key, error) {
 		if ctx.Err() != nil {
 			return "", nil, ctx.Err()
 		}
-		return "", nil, failure("E_HMAC_KEY", "machine key is missing, unsafe or incomplete; restore the recorded key, never regenerate it")
+		recoverable, repairErr := s.hmacBootstrapRecoverable(ctx, ref)
+		if repairErr != nil {
+			return "", nil, repairErr
+		}
+		if !recoverable {
+			return "", nil, failure("E_HMAC_KEY", "machine key is missing, unsafe or incomplete; restore the recorded key, never regenerate it")
+		}
+		generated = make([]byte, 32)
+		if _, err := rand.Read(generated); err != nil {
+			return "", nil, failure("E_HMAC_KEY", "cannot generate machine key")
+		}
+		digest := sha256.Sum256(generated)
+		checksum = hex.EncodeToString(digest[:])
+		newRef := uuid.NewString()
+		metadata, _ := json.Marshal(struct{ SHA256 string }{checksum})
+		if err := s.replaceIncompleteHMACBootstrap(ctx, ref, newRef, string(metadata)); err != nil {
+			return "", nil, err
+		}
+		ref = newRef
+		if err := objects.Create(ctx, ref, generated); err != nil {
+			return "", nil, err
+		}
+		if data, err = objects.Read(ctx, ref, 32); err != nil {
+			return "", nil, failure("E_HMAC_KEY", "repaired machine key could not be verified")
+		}
 	}
 	digest := sha256.Sum256(data)
 	if !private.Equal(checksum, hex.EncodeToString(digest[:])) {
-		return "", nil, failure("E_HMAC_KEY", "machine key changed; restore the recorded key")
+		recoverable, repairErr := s.hmacBootstrapRecoverable(ctx, ref)
+		if repairErr != nil {
+			return "", nil, repairErr
+		}
+		if !recoverable || len(data) == 32 {
+			return "", nil, failure("E_HMAC_KEY", "machine key changed; restore the recorded key")
+		}
+		generated = make([]byte, 32)
+		if _, err := rand.Read(generated); err != nil {
+			return "", nil, failure("E_HMAC_KEY", "cannot generate machine key")
+		}
+		digest = sha256.Sum256(generated)
+		checksum = hex.EncodeToString(digest[:])
+		newRef := uuid.NewString()
+		metadata, _ := json.Marshal(struct{ SHA256 string }{checksum})
+		if err := s.replaceIncompleteHMACBootstrap(ctx, ref, newRef, string(metadata)); err != nil {
+			return "", nil, err
+		}
+		ref = newRef
+		if err := objects.Create(ctx, ref, generated); err != nil {
+			return "", nil, err
+		}
+		data = generated
 	}
 	key, err := private.LoadKey(data)
 	if err != nil {
@@ -140,4 +186,39 @@ func (s *Store) HMACKey(ctx context.Context) (string, *private.Key, error) {
 		return "", nil, err
 	}
 	return ref, key, nil
+}
+
+func (s *Store) hmacBootstrapRecoverable(ctx context.Context, ref string) (bool, error) {
+	dependents, err := hmacDependentCount(ctx, s.db, ref)
+	if err != nil {
+		return false, err
+	}
+	return dependents == 0, nil
+}
+
+func hmacDependentCount(ctx context.Context, q queryer, ref string) (int, error) {
+	var dependents int
+	err := q.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM file_transactions) + (SELECT count(*) FROM managed_files) + (SELECT count(*) FROM managed_values) + (SELECT count(*) FROM operation_steps WHERE instr(request_metadata_json,?) > 0)`, ref).Scan(&dependents)
+	return dependents, dbError(err)
+}
+
+func (s *Store) replaceIncompleteHMACBootstrap(ctx context.Context, oldRef, newRef, metadata string) error {
+	return s.transaction(ctx, func(tx *sql.Tx) error {
+		dependents, err := hmacDependentCount(ctx, tx, oldRef)
+		if err != nil {
+			return err
+		}
+		if dependents != 0 {
+			return failure("E_HMAC_KEY", "machine key already has dependents; restore the recorded key")
+		}
+		var existing string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM credential_objects WHERE id=? AND secret_object_ref=? AND kind='hmac_key' AND deleted_at_ms IS NULL`, oldRef, oldRef).Scan(&existing); err != nil {
+			return failure("E_HMAC_KEY", "incomplete machine key record changed; retain it for recovery")
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM credential_objects WHERE id=? AND kind='hmac_key'`, oldRef); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO credential_objects(id,secret_object_ref,kind,metadata_json,created_at_ms) VALUES(?,?,'hmac_key',?,?)`, newRef, newRef, metadata, time.Now().UnixMilli())
+		return err
+	})
 }
