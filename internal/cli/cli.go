@@ -95,14 +95,17 @@ type initPreview struct {
 	Services         []initService `json:"services"`
 	HasConvexBackend bool          `json:"has_convex_backend"`
 	Written          bool          `json:"written"`
+	Updated          bool          `json:"updated"`
 }
 type initService struct {
-	ID            string `json:"id"`
-	Path          string `json:"path"`
-	Command       string `json:"command"`
-	Config        string `json:"config"`
-	PublicURL     bool   `json:"public_url"`
-	PublicSiteURL bool   `json:"public_site_url"`
+	ID            string   `json:"id"`
+	Path          string   `json:"path"`
+	Command       string   `json:"command"`
+	Config        string   `json:"config"`
+	Port          string   `json:"port,omitempty"`
+	PublicURL     bool     `json:"public_url"`
+	PublicSiteURL bool     `json:"public_site_url"`
+	Bindings      []string `json:"bindings,omitempty"`
 }
 type verification struct {
 	Configuration string `json:"configuration"`
@@ -469,12 +472,24 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	write := fs.Bool("write", false, "create eve.toml after review flags")
 	yes := fs.Bool("yes", false, "approve creating this exact manifest")
 	project := fs.String("project", "", "explicit team:project binding when Convex is discovered")
+	convexMode := fs.Bool("convex", false, "initialize or update a Convex resource workflow")
+	backendPath := fs.String("backend-path", "", "explicit discovered Convex package path when candidates are ambiguous")
+	profile := fs.String("profile", "", "Convex credential profile to bind once")
+	siteURLService := fs.String("site-url-service", "", "discovered service whose allocated URL should be the backend SITE_URL override")
+	update := fs.Bool("update", false, "review and update an existing committed eve.toml")
 	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid init options"}
 	}
 	if len(positional) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "init runs inside the source checkout"}
+	}
+	if *profile != "" && !profileName.MatchString(*profile) {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid credential profile name"}
+	}
+	if (*backendPath != "" || *siteURLService != "") && !*convexMode {
+		convexValue := true
+		convexMode = &convexValue
 	}
 	g, err := git.New()
 	if err != nil {
@@ -488,13 +503,24 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := lifecycle.ProposeInit(ctx, g, checkout.Identity.Path, lifecycle.InitOptions{Project: *project})
+	result, err := lifecycle.ProposeInit(ctx, g, checkout.Identity.Path, lifecycle.InitOptions{Project: *project, CredentialProfile: *profile, Convex: *convexMode, BackendPath: *backendPath, SiteURLService: *siteURLService, Update: *update})
 	if err != nil {
 		return nil, err
 	}
+	if result.HasConvexBackend {
+		credentialName := *profile
+		if credentialName == "" {
+			credentialName = "default"
+		}
+		result.Warnings = append(result.Warnings, "Convex credential profile "+strconv.Quote(credentialName)+" is not stored or validated by init; log in once before create when it is not already configured.")
+	}
 	preview := &initPreview{Manifest: result.ManifestText(), Evidence: result.Evidence, Warnings: result.Warnings, HasConvexBackend: result.HasConvexBackend}
 	for _, service := range result.Services {
-		preview.Services = append(preview.Services, initService{ID: service.ID, Path: service.Path, Command: service.Dev, Config: service.ViteConfig, PublicURL: service.PublicURL, PublicSiteURL: service.PublicSiteURL})
+		row := initService{ID: service.ID, Path: service.Path, Command: service.Dev, Config: service.ViteConfig, Port: service.Port, PublicURL: service.PublicURL, PublicSiteURL: service.PublicSiteURL}
+		for _, binding := range service.Bindings {
+			row.Bindings = append(row.Bindings, binding.Key+"->resources.backend."+binding.Output)
+		}
+		preview.Services = append(preview.Services, row)
 	}
 	written := false
 	if *write && !*dry {
@@ -504,7 +530,12 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 		if _, err := config.Parse(result.Manifest); err != nil {
 			return nil, err
 		}
-		if err := writeInitManifest(checkout.Identity.Path, result.Manifest); err != nil {
+		if *update {
+			if err := updateInitManifest(checkout.Identity.Path, result.Manifest); err != nil {
+				return nil, err
+			}
+			preview.Updated = true
+		} else if err := writeInitManifest(checkout.Identity.Path, result.Manifest); err != nil {
 			return nil, err
 		}
 		written = true
@@ -517,6 +548,9 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	}
 	if written {
 		human += "wrote eve.toml (0600); review/commit it before create\n"
+		if preview.Updated {
+			human += "updated eve.toml (0600); review/commit it before create\n"
+		}
 	}
 	response.Human = human
 	return response, nil
@@ -544,6 +578,42 @@ func writeInitManifest(root string, data []byte) error {
 	if err := file.Close(); err != nil {
 		return &domain.Error{Code: "E_FILE_IO", Message: "cannot close eve.toml", Path: root}
 	}
+	return platform.SyncDirectory(root)
+}
+func updateInitManifest(root string, data []byte) error {
+	owner, err := os.OpenRoot(root)
+	if err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot open source checkout safely", Path: root}
+	}
+	defer owner.Close()
+	if _, err := owner.Stat("eve.toml"); err != nil {
+		return &domain.Error{Code: "E_INIT_UPDATE", Message: "eve.toml must exist for the reviewed update", Path: root}
+	}
+	temporary := ".eve-init-" + uuid.NewString() + ".tmp"
+	file, err := owner.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot reserve reviewed manifest update safely", Path: temporary}
+	}
+	completed := false
+	defer func() {
+		if !completed {
+			file.Close()
+			_ = owner.Remove(temporary)
+		}
+	}()
+	if _, err := file.Write(data); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot write reviewed manifest update", Path: temporary}
+	}
+	if err := file.Sync(); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot sync reviewed manifest update", Path: temporary}
+	}
+	if err := file.Close(); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot close reviewed manifest update", Path: temporary}
+	}
+	if err := owner.Rename(temporary, "eve.toml"); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot publish reviewed manifest update", Path: "eve.toml"}
+	}
+	completed = true
 	return platform.SyncDirectory(root)
 }
 func existingCreate(ctx context.Context, s *state.Store, workspaceInfo state.Workspace, registered bool) (*output, error) {
