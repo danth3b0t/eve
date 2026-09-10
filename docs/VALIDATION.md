@@ -98,6 +98,8 @@ Read-only `eve list [--all]` reports registered repositories, live workspaces, p
 `eve plan` independently evaluates the committed target before registration/mutation; CLI evidence confirms no registry database or worktrees are created and no ports/providers are exercised.
 ## M5 packaging foundation
 
+ Linux/arm64 QEMU execution passes the release version command and the CGo-disabled state/files/lifecycle suites. Self-executing crash fixtures were skipped because QEMU child re-exec was unavailable; this remains emulated evidence, not hardware arm64 or macOS evidence.
+
 `eve --version` reports 0.1.0. `scripts/release.sh` produces stripped CGo-disabled Linux/macOS amd64/arm64 binaries and `SHA256SUMS.txt`; Linux/amd64 executes expected output, while other artifacts still need physical host validation. docs/UNINSTALL.md now warns against deleting binaries/state before exact cloud cleanup.
 
 

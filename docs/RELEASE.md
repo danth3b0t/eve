@@ -32,6 +32,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 - Native fixture: unchanged Bun/Turbo/Vite/Convex launch succeeds; real browser validation passes with the optional `agent-browser` harness only.
 - Remote: default region and `aws-eu-west-1` production lifecycle passes with exact cleanup.
 - Binaries: static ELF Linux amd64/arm64 and Mach-O macOS amd64/arm64 build with the expected Go module set. Only the Linux/amd64 artifact was executed (`eve 0.1.0`).
+- Linux/arm64: release binary responds with `eve 0.1.0` under QEMU; state/files/lifecycle CGo-disabled tests pass. This is emulated evidence with explicitly skipped self-exec helpers, not hardware arm64 validation.
 
 ## Remaining publication gates
 
