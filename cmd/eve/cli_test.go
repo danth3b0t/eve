@@ -146,8 +146,23 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 			t.Fatal("unapproved create made worktree parent")
 		}
 	}
+	ptyPath, err := exec.LookPath("script")
+	if err != nil {
+		t.Skip("util-linux script is unavailable for the PTY approval probe")
+	}
+	ptyCmd := exec.Command(ptyPath, "-qec", binary+" create payments", "/dev/null")
+	ptyCmd.Dir = root
+	ptyCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(base, "home"), "XDG_CONFIG_HOME=" + filepath.Join(base, "config"), "XDG_STATE_HOME=" + filepath.Join(base, "xdg"), "EVE_STATE_DIR=" + filepath.Join(base, "state"), "GIT_CONFIG_NOSYSTEM=1"}
+	ptyCmd.Stdin = strings.NewReader("yes\n")
+	ptyOut, err := ptyCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("typed PTY approval did not create: %v %s", err, ptyOut)
+	}
+	if !strings.Contains(string(ptyOut), "Create this workspace?") || !strings.Contains(string(ptyOut), "created \"payments\"") {
+		t.Fatalf("PTY approval output: %s", ptyOut)
+	}
 	code, stdout, _, created := command(t, binary, root, base, "create", "--yes", "--json", "payments")
-	if code != 0 || !created.OK || created.Workspace.State != "prepared" || created.Workspace.Generation != 1 {
+	if code != 0 || !created.OK || !created.Existing || created.Workspace.State != "prepared" || created.Workspace.Generation != 1 {
 		t.Fatalf("create: code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	if !strings.Contains(string(stdout), `"workspace":{"id"`) || !strings.Contains(string(stdout), `"generation":1`) {

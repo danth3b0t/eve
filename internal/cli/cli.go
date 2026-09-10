@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -253,27 +254,61 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "create requires one branch"}
 	}
 	branch := fs.Arg(0)
-	if !*yes && !*jsonOut {
-		g, err := git.New()
-		if err != nil {
-			return nil, err
-		}
+	registered := false
+	approved := *yes
+	reviewed := lifecycle.PlanPreview{}
+	if !approved && !*jsonOut {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current checkout is inaccessible"}
+			return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
+		}
+		// Existing state owns this command's identity before a fresh plan is shown.
+		// Read-only state may be unavailable while the source is not registrable.
+		g, s, err := storeFor(ctx, false)
+		if err == nil {
+			if existing, existingErr := resolveWorkspace(ctx, g, s, branch); existingErr == nil {
+				if existing.State != "prepared" {
+					closeErr := s.Close()
+					if closeErr != nil {
+						return nil, closeErr
+					}
+					return nil, &domain.Error{Code: "E_RESUME_REQUIRED", Message: "an active or failed operation already owns that branch; resume it rather than replacing identity", Path: existing.ID}
+				}
+				response, outErr := existingCreate(ctx, s, existing, registered)
+				closeErr := s.Close()
+				if outErr != nil {
+					return nil, outErr
+				}
+				if closeErr != nil {
+					return nil, closeErr
+				}
+				return response, nil
+			}
+			if closeErr := s.Close(); closeErr != nil {
+				return nil, closeErr
+			}
+		} else {
+			if codeOf(err) != "E_STATE_PATH" {
+				return nil, err
+			}
+			if g, err = git.New(); err != nil {
+				return nil, err
+			}
 		}
 		preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, branch, *from)
 		if err != nil {
 			return nil, err
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "Create workspace for %s\nsource: %s\ntarget commit: %s\nmanifest destinations: %d\nNew worktree and provider effects require typed approval.\n", quote(preview.Branch), preview.Source, preview.HeadOID, len(preview.Files.Files))
-		approved, err := interactiveYes(ctx, "Create this workspace?")
+		confirmed, err := interactiveYes(ctx, "Create this workspace?")
 		if err != nil {
 			return nil, err
 		}
-		if !approved {
+		if !confirmed {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "create was not approved; no state or workspace was changed"}
 		}
+		reviewed = preview
+		approved = true
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -284,8 +319,6 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
 	}
-	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
-	registered := false
 	if existing, existingErr := resolveWorkspace(ctx, g, s, branch); existingErr == nil {
 		if existing.State == "prepared" {
 			if *from != "" {
@@ -295,8 +328,9 @@ func create(ctx context.Context, args []string) (*output, error) {
 		}
 		return nil, &domain.Error{Code: "E_RESUME_REQUIRED", Message: "an active or failed operation already owns that branch; resume it rather than replacing identity", Path: existing.ID}
 	}
+	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
 	if codeOf(planErr) == "E_SOURCE_UNREGISTERED" {
-		if !*yes {
+		if !approved {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "first creation would register this canonical source checkout; rerun with --yes after review"}
 		}
 		if _, err := lifecycle.RegisterSource(ctx, s, g, cwd); err != nil {
@@ -308,8 +342,14 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if planErr != nil {
 		return nil, planErr
 	}
-	if !*yes {
+	if !approved {
 		return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "create would allocate and prepare a workspace; rerun with --yes after review"}
+	}
+	if !*yes {
+		manifestDigest := sha256.Sum256(plan.Target.Manifest)
+		if reviewed.Branch != plan.Target.Branch || reviewed.HeadOID != plan.Target.HeadOID || reviewed.ManifestSHA256 != fmt.Sprintf("%x", manifestDigest) {
+			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "target changed after interactive approval; rerun create and review the updated plan"}
+		}
 	}
 	user, err := loadConfig()
 	if err != nil {
