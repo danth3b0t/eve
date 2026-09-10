@@ -131,7 +131,7 @@ func ProposeInit(ctx context.Context, g *git.Client, root string, options InitOp
 			services[i].Bindings = append(services[i].Bindings, InitBinding{Key: "VITE_CONVEX_SITE_URL", Output: "site_url"})
 		}
 	}
-	if err := importEnvBindings(ctx, checkout, services); err != nil {
+	if err := importEnvBindings(ctx, checkout, services, backend); err != nil {
 		return result, err
 	}
 	merged, err := mergeInitManifest(existing, services, backend, options)

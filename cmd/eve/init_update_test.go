@@ -60,6 +60,9 @@ func TestConvexOnlyInitAndReviewedUpdate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "apps/web/.env.local"), []byte("CUSTOM_BACKEND=https://stale-project.convex.cloud\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "packages/backend/.env.local"), []byte("CONVEX_URL=https://stale-project.convex.cloud\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	code, stdout, _, _ = command(t, binary, root, base, "init", "--update", "--write", "--yes", "--json", "--convex")
 	if code != 0 || !strings.Contains(string(stdout), `"updated":true`) || !strings.Contains(string(stdout), `CUSTOM_BACKEND-`) {

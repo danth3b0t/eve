@@ -55,8 +55,11 @@ func TestConvexOnlyInitDoesNotRequireAWebService(t *testing.T) {
 
 func TestInitImportsExactLocalConvexBindingsWithoutValues(t *testing.T) {
 	r := initDiscoveryFixture(t, false)
-	local := "VITE_CONVEX_URL=https://existing-a.convex.cloud\nVITE_CONVEX_SITE_URL=https://existing-a.convex.site\nCUSTOM_BACKEND=https://existing-offline.convex.cloud\nDO_NOT_EXPORT_THIS=secret-local-value\n"
+	local := "VITE_CONVEX_URL=https://existing-a.convex.cloud\nVITE_CONVEX_SITE_URL=https://existing-a.convex.site\nCUSTOM_BACKEND=https://existing-offline.convex.cloud\nUNMATCHED_BACKEND=https://unmatched.convex.cloud\nDO_NOT_EXPORT_THIS=secret-local-value\n"
 	if err := os.WriteFile(filepath.Join(r.root, "apps/web/.env.local"), []byte(local), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.root, "packages/backend/.env.local"), []byte("CONVEX_URL=https://existing-offline.convex.cloud\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	result, err := ProposeInit(t.Context(), r.client, r.root, InitOptions{Project: "dev-team:m0", Convex: true})
@@ -71,6 +74,9 @@ func TestInitImportsExactLocalConvexBindingsWithoutValues(t *testing.T) {
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("imported binding missing %q:\n%s", required, text)
+		}
+		if strings.Contains(text, "UNMATCHED_BACKEND") {
+			t.Fatal("unmatched custom Convex URL created a binding")
 		}
 	}
 	for _, secret := range []string{"existing-a.convex", "existing-offline.convex", "secret-local-value", "DO_NOT_EXPORT_THIS"} {
@@ -131,6 +137,9 @@ project = "dev-team:m0"
 	command(t, r.root, "commit", "-qm", "existing custom manifest")
 	local := "CUSTOM_BACKEND=https://existing-offline.convex.cloud\n"
 	if err := os.WriteFile(filepath.Join(r.root, "apps/web/.env.local"), []byte(local), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.root, "packages/backend/.env.local"), []byte("CONVEX_URL=https://existing-offline.convex.cloud\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	result, err := ProposeInit(t.Context(), r.client, r.root, InitOptions{Convex: true, Update: true})

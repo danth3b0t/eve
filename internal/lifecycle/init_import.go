@@ -46,7 +46,20 @@ var knownConvexBindings = map[string]string{
 	"CONVEX_SITE_URL":             "site_url",
 }
 
-func importEnvBindings(ctx context.Context, checkout git.Checkout, services []InitService) error {
+func importEnvBindings(ctx context.Context, checkout git.Checkout, services []InitService, backend string) error {
+	hints := map[string]string{}
+	if backend != "" {
+		data, _, err := files.ReadDestination(ctx, checkout.Identity, baseEnvPath(backend))
+		if err != nil {
+			return err
+		}
+		values, err := literalEnvValues(data)
+		if err != nil {
+			return proposalProblem("E_ENV_SYNTAX", baseEnvPath(backend)+" could not be audited without exposing values")
+		}
+		hints["url"] = values["CONVEX_URL"]
+		hints["site_url"] = values["CONVEX_SITE_URL"]
+	}
 	for i := range services {
 		name := baseEnvPath(services[i].Path)
 		data, _, err := files.ReadDestination(ctx, checkout.Identity, name)
@@ -65,7 +78,7 @@ func importEnvBindings(ctx context.Context, checkout git.Checkout, services []In
 			output, found := knownConvexBindings[key]
 			if !found {
 				output = convexURLOutput(values[key])
-				found = output != ""
+				found = output != "" && hints[output] == values[key]
 			}
 			if found {
 				bound[key] = output
