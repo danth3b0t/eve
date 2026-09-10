@@ -88,8 +88,10 @@ Offline tests cover sanitized provider failures, exact-reference reconciliation 
 
 Bounded `gc` is report-only by default. `gc --apply` verifies recorded worktree/admin absence before generating a new destroy intent, completes exact remote deletion/key purge and claim release, and refuses recreated paths.
 
+
+Additive/value-only `sync` runs local and Git drift checks before any remote write, uploads only declared resource env keys, publishes generation 2 with fresh fingerprints, and reports `restart_required`. Tests cover absent bytecode no-ops, unmanaged content, drift/overwrite, remote additive values, and destruction after sync.
 ## M4 inspection
 
 Read-only `eve list [--all]` reports registered repositories, live workspaces, public ports and public Convex metadata without creating locks, credentials, files or remote calls. CLI tests confirm the same workspace appears with its assigned port and disappears from the default report after exact destruction. Discovery/`init`/`doctor` remain unimplemented.
 
-See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), and [M4.md](M4.md) for scope. `sync`, `gc`, discovery/`init`/`doctor` and release packaging are not implemented.
+See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), and [M4.md](M4.md) for scope. Broader topology sync, discovery/`init`/`doctor` and release packaging are not implemented.

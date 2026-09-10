@@ -30,3 +30,21 @@ func CompareManagedContent(ctx context.Context, id domain.GitIdentity, name stri
 	}
 	return r.check()
 }
+
+// ReadDestination snapshots one declared target with the no-link/no-follow
+// policy. A nil identity means clean absence, not an existing user file.
+func ReadDestination(ctx context.Context, id domain.GitIdentity, name string) ([]byte, *domain.FileIdentity, error) {
+	r, err := openRoot(id.Path, id.PathIdentity)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer r.fs.Close()
+	current, err := r.read(ctx, name, MaxCopyBytes, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := r.check(); err != nil {
+		return nil, nil, err
+	}
+	return current.data, identity(current.info), nil
+}

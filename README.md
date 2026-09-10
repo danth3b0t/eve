@@ -8,7 +8,7 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 M0's full Linux Bun/Turbo/Convex live test passes, including inherited development defaults, native launch, keys/expiry and exact cleanup. macOS and regional URL acceptance remain open.
 
-The guarded CLI now supports `create`, `path`, `status`, `resume`, `list`, bounded `gc`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. `sync`, discovery/onboarding UX and M4–M5 remain pending.
+The guarded CLI now supports `create`, `path`, `status`, `resume`, additive `sync`, `list`, bounded `gc`, and `destroy` for local or Convex-backed workspaces. A production-CLI live test provisioned two independent finite Convex dev deployments, launched both through unchanged native scripts, deleted exactly those resources, preserved defaults, and left no residue. Broader topology sync, discovery/onboarding UX and M4–M5 remain pending.
 
 Only explicit mutations are supported, and interactive approval is not implemented in this slice:
 
@@ -17,6 +17,7 @@ eve create --yes feature/payments       # branch worktree, reservations, native 
 eve path feature/payments
 eve status feature/payments
 eve resume feature/payments
+eve sync feature/payments          # stop the ordinary project launcher first
 eve destroy --yes feature/payments    # stop the ordinary project launcher first
 eve list [--all]
 eve gc [--apply]

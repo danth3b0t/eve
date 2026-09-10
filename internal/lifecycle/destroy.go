@@ -106,8 +106,8 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	if !opts.Approved {
 		return DestroyResult{}, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "destroy requires explicit approval; no local mutation was started"}
 	}
-	if step.State == "ready" {
-		// Reconcile any delayed snapshot purge before retaining only fingerprints.
+	if step.State == "ready" && step.Workspace.Generation == 1 {
+		// Reconcile any delayed create-image snapshot purge before retaining fingerprints.
 		if _, err := PublishFiles(ctx, s, g, w); err != nil {
 			return DestroyResult{}, err
 		}

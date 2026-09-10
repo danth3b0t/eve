@@ -20,9 +20,10 @@ type envelope struct {
 		ID, Branch, Path, State, Phase string
 		Generation                     int
 	}
-	Existing bool
-	Error    struct{ Code, Message string }
-	Services map[string]struct {
+	Existing        bool
+	RestartRequired bool `json:"restart_required"`
+	Error           struct{ Code, Message string }
+	Services        map[string]struct {
 		Port int
 		URL  string
 	}
@@ -150,6 +151,24 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	allCode, allOut, _, _ := command(t, binary, root, base, "list", "--json", "--all")
 	if allCode != 0 || !strings.Contains(string(allOut), `"label":"source"`) || !strings.Contains(string(allOut), path) {
 		t.Fatalf("list --all output incomplete: %d %s", allCode, allOut)
+	}
+	syncManifest := "version = 1\n[workspace]\nport_block_size = 4\n[services.web]\npath = \"env\"\nenv_file = \"generated.env\"\nport = \"PORT\"\n[services.web.env]\nPUBLIC_NAME = \"synced-native\"\nSYNC_ADD = \"${workspace.id}\"\n"
+	if err := os.WriteFile(filepath.Join(path, "eve.toml"), []byte(syncManifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, path, "add", "eve.toml")
+	runGit(t, path, "commit", "-qm", "sync declaration")
+	syncCode, syncOut, _, synced := command(t, binary, root, base, "sync", "--json", "payments")
+	if syncCode != 0 || !synced.OK || synced.Workspace.Generation != 2 || !synced.RestartRequired {
+		t.Fatalf("sync: %d %s", syncCode, syncOut)
+	}
+	syncedData, err := os.ReadFile(filepath.Join(path, "env", "generated.env"))
+	if err != nil || !strings.Contains(string(syncedData), "PUBLIC_NAME=synced-native\n") || !strings.Contains(string(syncedData), "SYNC_ADD="+created.Workspace.ID+"\n") {
+		t.Fatal("synced image missing")
+	}
+	repeatSyncCode, repeatSyncOut, _, repeatSync := command(t, binary, root, base, "sync", "--json", "payments")
+	if repeatSyncCode != 0 || repeatSync.RestartRequired || repeatSync.Workspace.Generation != 2 {
+		t.Fatalf("no-change sync was not idempotent: %d %s", repeatSyncCode, repeatSyncOut)
 	}
 	code, stdout, _, _ = command(t, binary, root, base, "path", "payments")
 	if code != 0 || strings.TrimSpace(string(stdout)) != path {

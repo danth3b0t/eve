@@ -85,7 +85,7 @@ func approved(t *testing.T, r repository, p GitPlan) *state.LockedWorkspace {
 			t.Error(err)
 		}
 	})
-	settings, err := config.ParseUser([]byte("version = 1\n"))
+	settings, err := config.ParseUser([]byte("version = 1\n[ports]\nmin = 41200\nmax = 41900\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

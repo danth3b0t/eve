@@ -172,10 +172,18 @@ func fakeConvexFactory(t *testing.T, managed chan map[string]string, failOnce bo
 				var request struct {
 					Changes []map[string]string `json:"changes"`
 				}
-				if json.Unmarshal(data, &request) != nil || len(request.Changes) != 1 || request.Changes[0]["name"] != "SITE_URL" {
+				if json.Unmarshal(data, &request) != nil || len(request.Changes) < 1 || len(request.Changes) > 2 {
 					t.Fatal("remote update broadened")
 				}
-				managed <- request.Changes[0]
+				merged := map[string]string{}
+				for _, change := range request.Changes {
+					name := change["name"]
+					if name != "SITE_URL" && name != "CUSTOM_SYNC" {
+						t.Fatal("remote update included unowned key")
+					}
+					merged[name] = change["value"]
+				}
+				managed <- merged
 				return body(200, ""), nil
 			}
 			t.Fatalf("unexpected provider operation %s %s://%s%s", r.Method, r.URL.Scheme, r.URL.Host, r.URL.Path)
@@ -282,7 +290,7 @@ func TestConvexProvisioningStagesAndPublishesExactBindings(t *testing.T) {
 	}
 	update := <-managed
 	wantURL := allocation.Endpoints[0].Scheme + "://" + net.JoinHostPort(allocation.Endpoints[0].Host, fmt.Sprint(allocation.Endpoints[0].Port))
-	if update["name"] != "SITE_URL" || update["value"] != wantURL {
+	if update["SITE_URL"] != wantURL {
 		t.Fatalf("bad remote env update: %v", update)
 	}
 	resources, err := lock.Resources(t.Context())

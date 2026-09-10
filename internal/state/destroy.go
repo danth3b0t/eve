@@ -33,7 +33,7 @@ func readDestroyStep(ctx context.Context, tx *sql.Tx, id string) (DestroyStep, e
 		return step, failure("E_STATE_INTENT", "recorded Git identity is unavailable for destruction")
 	}
 	step.State = "ready"
-	if w.State == "prepared" && w.Phase == "complete" && w.Generation == 1 && w.OperationID == "" {
+	if w.State == "prepared" && w.Phase == "complete" && w.Generation >= 1 && w.OperationID == "" {
 		return step, nil
 	}
 	if w.State == "cleanup_pending" && w.Phase == "claim_release" {
@@ -63,7 +63,7 @@ func (w *LockedWorkspace) DestroyStep(ctx context.Context) (DestroyStep, error) 
 func (w *LockedWorkspace) OwnedFile(ctx context.Context, name string) (hmac string, mode uint32, err error) {
 	err = w.withLock(func() error {
 		return w.store.transaction(ctx, func(tx *sql.Tx) error {
-			return tx.QueryRowContext(ctx, `SELECT published_content_hmac,mode FROM managed_files WHERE workspace_id=? AND path=? AND is_tracked=1 AND published_generation=1`, w.id, name).Scan(&hmac, &mode)
+			return tx.QueryRowContext(ctx, `SELECT published_content_hmac,mode FROM managed_files WHERE workspace_id=? AND path=? AND is_tracked=1 AND published_generation=(SELECT generation FROM workspaces WHERE id=?)`, w.id, name, w.id).Scan(&hmac, &mode)
 		})
 	})
 	return hmac, mode, err

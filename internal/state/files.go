@@ -28,8 +28,11 @@ type FileRecord struct {
 	Values                    map[string]string // env key -> HMAC; ownership remains in frozen manifest
 }
 type FileIntent struct {
-	KeyID string
-	Files []FileRecord
+	KeyID                   string
+	HeadOID, ManifestSHA256 string
+	Owners                  map[string]map[string][]string
+	Manifest                *config.Manifest
+	Files                   []FileRecord
 }
 type FileStep struct {
 	Workspace Workspace
@@ -70,7 +73,7 @@ func validateFiles(in FileIntent) error {
 			}
 		} else {
 			p := f.Preimage
-			if !f.Tracked || !fileIdentity.MatchString(p.Identity) || !p.Mode.IsRegular() || p.Size < 0 || p.Size > private.MaxBytes || !validID(f.PreimageRef) || refs[f.PreimageRef] || !fingerprint.MatchString(f.PreimageHMAC) {
+			if !fileIdentity.MatchString(p.Identity) || !p.Mode.IsRegular() || p.Size < 0 || p.Size > private.MaxBytes || !validID(f.PreimageRef) || refs[f.PreimageRef] || !fingerprint.MatchString(f.PreimageHMAC) {
 				return bad()
 			}
 			refs[f.PreimageRef] = true

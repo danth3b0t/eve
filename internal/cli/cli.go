@@ -25,20 +25,21 @@ import (
 )
 
 type output struct {
-	SchemaVersion int                 `json:"schema_version"`
-	Command       string              `json:"command"`
-	OK            bool                `json:"ok"`
-	Workspace     *workspace          `json:"workspace,omitempty"`
-	Services      map[string]service  `json:"services,omitempty"`
-	Resources     map[string]resource `json:"resources,omitempty"`
-	Verification  *verification       `json:"verification,omitempty"`
-	Existing      bool                `json:"existing,omitempty"`
-	Repositories  []repositoryGroup   `json:"repositories,omitempty"`
-	GC            []gcCandidate       `json:"gc_candidates,omitempty"`
-	Auth          map[string]string   `json:"auth,omitempty"`
-	Warnings      []string            `json:"warnings,omitempty"`
-	Error         *commandError       `json:"error,omitempty"`
-	Human         string              `json:"-"`
+	SchemaVersion   int                 `json:"schema_version"`
+	Command         string              `json:"command"`
+	OK              bool                `json:"ok"`
+	Workspace       *workspace          `json:"workspace,omitempty"`
+	Services        map[string]service  `json:"services,omitempty"`
+	Resources       map[string]resource `json:"resources,omitempty"`
+	Verification    *verification       `json:"verification,omitempty"`
+	RestartRequired bool                `json:"restart_required,omitempty"`
+	Existing        bool                `json:"existing,omitempty"`
+	Repositories    []repositoryGroup   `json:"repositories,omitempty"`
+	GC              []gcCandidate       `json:"gc_candidates,omitempty"`
+	Auth            map[string]string   `json:"auth,omitempty"`
+	Warnings        []string            `json:"warnings,omitempty"`
+	Error           *commandError       `json:"error,omitempty"`
+	Human           string              `json:"-"`
 }
 type workspace struct {
 	ID         string `json:"id"`
@@ -133,6 +134,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return inspect(ctx, args[1:], false)
 	case "resume":
 		return resume(ctx, args[1:])
+	case "sync":
+		return sync(ctx, args[1:])
 	case "list":
 		return list(ctx, args[1:])
 	case "gc":
@@ -545,6 +548,51 @@ func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now 
 	}
 	return candidate, false, nil
 }
+func sync(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("sync")
+	overwrite := fs.Bool("overwrite-managed", false, "replace an externally edited EVE-managed value")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid sync options"}
+	}
+	if fs.NArg() > 1 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "sync accepts at most one workspace"}
+	}
+	selector := ""
+	if fs.NArg() == 1 {
+		selector = fs.Arg(0)
+	}
+	g, s, err := storeFor(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	workspaceInfo, err := resolveWorkspace(ctx, g, s, selector)
+	if err != nil {
+		return nil, err
+	}
+	result, err := lifecycle.SyncWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.SyncOptions{OverwriteManaged: *overwrite})
+	if err != nil {
+		return nil, err
+	}
+	response := success("sync", result.Workspace)
+	response.RestartRequired = result.RestartRequired
+	allocation, err := s.Allocation(ctx, result.Workspace.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setServices(allocation)
+	resources, err := s.Resources(ctx, result.Workspace.ID)
+	if err != nil {
+		return nil, err
+	}
+	response.setResources(resources)
+	if result.RestartRequired {
+		response.Human = fmt.Sprintf("synced generation %d for workspace %s\nrestart the project with its ordinary command\n", result.Workspace.Generation, result.Workspace.ID)
+	} else {
+		response.Human = fmt.Sprintf("workspace %s already matches generation %d\n", result.Workspace.ID, result.Workspace.Generation)
+	}
+	return response, nil
+}
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")
 	if err := fs.Parse(args); err != nil {
@@ -719,7 +767,7 @@ func exitCode(err error) int {
 		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
-	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED":
+	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED":
 		return 3
 	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2
@@ -757,6 +805,8 @@ func errorResult(command string, err error) *output {
 		response.Error.NextAction = "review changes or use --discard-changes to discard that work"
 	case "E_POSSIBLY_RUNNING":
 		response.Error.NextAction = "stop the ordinary project launcher first; --assume-stopped is an assessment assertion only"
+	case "E_MANAGED_VALUE_CHANGED":
+		response.Error.NextAction = "review the value, restore EVE's recorded setting or rerun sync with --overwrite-managed"
 	}
 	return response
 }
