@@ -2,6 +2,7 @@
 
 **Version:** 0.1.0 · **Status:** source-level packaging foundation. Linux/amd64 is the only fully executed runtime platform. All four architecture artifacts build with CGo disabled; macOS and arm64 tests still need real hosts before publication.
 
+Only Linux/amd64 should be presented as a supported runtime until the physical-host gates pass. `eve-linux-arm64`, `eve-darwin-amd64` and `eve-darwin-arm64` are preview artifacts, not supported binaries.
 ## Build
 
 ```sh
@@ -37,7 +38,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 ## Remaining publication gates
 
 - Execute the actual macOS amd64/arm64 and Linux arm64 artifacts, including filesystem/locking behavior.
-- Run the full native/browser Convex lifecycle on each shipping host.
+- Run the full native/browser Convex lifecycle on every platform that will be advertised as supported.
+- Exercise one externally owned existing monorepo with an explicitly authorized live credential; the local Kairo checkout currently has unowned in-flight changes and no EVE credential profile, so ignored Convex state was not scraped.
 - Obtain explicit signatures/notarization policy if required; checksums are only integrity metadata.
 - Complete uninstall cleanup evidence and honest support documentation.
-- TTL-elapsed outages, broader topology/sync recovery and interactive onboarding UX are not release-complete.
