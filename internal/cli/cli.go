@@ -25,21 +25,22 @@ import (
 )
 
 type output struct {
-	SchemaVersion   int                 `json:"schema_version"`
-	Command         string              `json:"command"`
-	OK              bool                `json:"ok"`
-	Workspace       *workspace          `json:"workspace,omitempty"`
-	Services        map[string]service  `json:"services,omitempty"`
-	Resources       map[string]resource `json:"resources,omitempty"`
-	Verification    *verification       `json:"verification,omitempty"`
-	RestartRequired bool                `json:"restart_required,omitempty"`
-	Existing        bool                `json:"existing,omitempty"`
-	Repositories    []repositoryGroup   `json:"repositories,omitempty"`
-	GC              []gcCandidate       `json:"gc_candidates,omitempty"`
-	Auth            map[string]string   `json:"auth,omitempty"`
-	Warnings        []string            `json:"warnings,omitempty"`
-	Error           *commandError       `json:"error,omitempty"`
-	Human           string              `json:"-"`
+	SchemaVersion   int                    `json:"schema_version"`
+	Command         string                 `json:"command"`
+	OK              bool                   `json:"ok"`
+	Workspace       *workspace             `json:"workspace,omitempty"`
+	Services        map[string]service     `json:"services,omitempty"`
+	Resources       map[string]resource    `json:"resources,omitempty"`
+	Verification    *verification          `json:"verification,omitempty"`
+	RestartRequired bool                   `json:"restart_required,omitempty"`
+	Existing        bool                   `json:"existing,omitempty"`
+	Plan            *lifecycle.PlanPreview `json:"plan,omitempty"`
+	Repositories    []repositoryGroup      `json:"repositories,omitempty"`
+	GC              []gcCandidate          `json:"gc_candidates,omitempty"`
+	Auth            map[string]string      `json:"auth,omitempty"`
+	Warnings        []string               `json:"warnings,omitempty"`
+	Error           *commandError          `json:"error,omitempty"`
+	Human           string                 `json:"-"`
 }
 type workspace struct {
 	ID         string `json:"id"`
@@ -128,6 +129,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return auth(ctx, args[1:])
 	case "create":
 		return create(ctx, args[1:])
+	case "plan":
+		return plan(ctx, args[1:])
 	case "path":
 		return inspect(ctx, args[1:], true)
 	case "status":
@@ -276,6 +279,39 @@ func create(ctx context.Context, args []string) (*output, error) {
 		response.Warnings = append(response.Warnings, "Registered this canonical source checkout after explicit approval.")
 	}
 	response.Human = fmt.Sprintf("created %s\npath: %s\nUse the project's existing setup/start procedure; stop it before sync or destroy.\n", strconv.Quote(branch), prepared.Path)
+	return response, nil
+}
+func plan(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("plan")
+	from := fs.String("from", "", "existing commit/ref for a new branch")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid plan options"}
+	}
+	if fs.NArg() != 1 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "plan requires one branch"}
+	}
+	g, err := git.New()
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
+	}
+	preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, fs.Arg(0), *from)
+	if err != nil {
+		return nil, err
+	}
+	response := &output{SchemaVersion: 1, Command: "plan", OK: true, Plan: &preview}
+	human := fmt.Sprintf("plan for %s\nsource: %s\ntarget: %s\n", quote(preview.Branch), preview.Source, preview.HeadOID)
+	if len(preview.Endpoints) != 0 {
+		human += fmt.Sprintf("prospective endpoints: %d\n", len(preview.Endpoints))
+	}
+	if len(preview.Files.Files) != 0 {
+		human += fmt.Sprintf("native/copy destinations: %d\n", len(preview.Files.Files))
+	}
+	human += "no state, workspaces, ports or provider resources created\n"
+	response.Human = human
 	return response, nil
 }
 func existingCreate(ctx context.Context, s *state.Store, workspaceInfo state.Workspace, registered bool) (*output, error) {

@@ -93,5 +93,6 @@ Additive/value-only `sync` runs local and Git drift checks before any remote wri
 ## M4 inspection
 
 Read-only `eve list [--all]` reports registered repositories, live workspaces, public ports and public Convex metadata without creating locks, credentials, files or remote calls. CLI tests confirm the same workspace appears with its assigned port and disappears from the default report after exact destruction. Discovery/`init`/`doctor` remain unimplemented.
+`eve plan` independently evaluates the committed target before registration/mutation; CLI evidence confirms no registry database or worktrees are created and no ports/providers are exercised.
 
 See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), and [M4.md](M4.md) for scope. Broader topology sync, discovery/`init`/`doctor` and release packaging are not implemented.

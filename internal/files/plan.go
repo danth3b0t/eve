@@ -15,15 +15,16 @@ import (
 )
 
 type File struct {
-	Path, Origin    string // local, target, or new
-	Native, Tracked bool
-	Keys            []string
+	Path    string   `json:"path"`
+	Origin  string   `json:"origin"`
+	Native  bool     `json:"native"`
+	Tracked bool     `json:"tracked"`
+	Keys    []string `json:"keys"`
 }
-
 type Report struct {
-	Files          []File
-	UnmatchedGlobs []string
-	CopyBytes      int64
+	Files          []File   `json:"files"`
+	UnmatchedGlobs []string `json:"unmatched_globs,omitempty"`
+	CopyBytes      int64    `json:"copy_bytes"`
 }
 
 type input struct {

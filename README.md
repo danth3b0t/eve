@@ -14,6 +14,7 @@ Only explicit mutations are supported, and interactive approval is not implement
 
 ```sh
 eve create --yes feature/payments       # branch worktree, reservations, native files
+eve plan feature/payments
 eve path feature/payments
 eve status feature/payments
 eve resume feature/payments

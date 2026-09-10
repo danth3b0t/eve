@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -105,6 +106,13 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if data, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, data)
 	}
+	planCode, planOut, _, _ := command(t, binary, root, base, "plan", "--json", "payments")
+	if planCode != 0 || !strings.Contains(string(planOut), `"branch":"payments"`) || !strings.Contains(string(planOut), `"head_oid"`) || !strings.Contains(string(planOut), `"files":{"files"`) {
+		t.Fatalf("plan output: %d %s", planCode, planOut)
+	}
+	if info, err := os.Lstat(filepath.Join(base, "state", "state.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf("plan created state: %v", info)
+	}
 	code, _, stderr, _ := command(t, binary, root, base, "create", "payments")
 	if code != 3 || !strings.Contains(string(stderr), "E_APPROVAL_REQUIRED") {
 		t.Fatalf("unapproved create code=%d stderr=%s", code, stderr)
@@ -145,7 +153,7 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 		t.Fatal("source checkout changed")
 	}
 	listCode, listOut, _, _ := command(t, binary, root, base, "list", "--json")
-	if listCode != 0 || !strings.Contains(string(listOut), `"repositories"`) || !strings.Contains(string(listOut), created.Workspace.ID) || !strings.Contains(string(listOut), `"port":39400`) {
+	if listCode != 0 || !strings.Contains(string(listOut), `"repositories"`) || !strings.Contains(string(listOut), created.Workspace.ID) || !strings.Contains(string(listOut), `"port":`+strconv.Itoa(created.Services["web"].Port)) {
 		t.Fatalf("list output incomplete: code=%d out=%s", listCode, listOut)
 	}
 	allCode, allOut, _, _ := command(t, binary, root, base, "list", "--json", "--all")
