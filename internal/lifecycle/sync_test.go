@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,64 @@ func TestSyncAdditiveValuesPreservesUnmanagedContentAndAdvancesGeneration(t *tes
 	}
 	if third.RestartRequired || third.Workspace.Generation != 2 {
 		t.Fatal("no-change sync created another generation")
+	}
+}
+
+func TestSyncAddsEndpointWithoutReassigningExistingSlots(t *testing.T) {
+	r := repositoryFixture(t)
+	if err := os.WriteFile(filepath.Join(r.root, ".gitignore"), []byte("/.env.local\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	text := "version = 1\n[workspace]\nport_block_size = 4\n[services.api]\npath = \".\"\nenv_file = \".env.local\"\nport = \"PORT\"\n[services.api.env]\nPUBLIC_NAME = \"old\"\n"
+	if err := os.WriteFile(filepath.Join(r.root, "eve.toml"), []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command(t, r.root, "add", ".")
+	command(t, r.root, "commit", "-qm", "endpoint sync baseline")
+	if _, err := RegisterSource(t.Context(), r.store, r.client, r.root); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanGit(t.Context(), r.store, r.client, r.root, "sync-endpoint", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := approved(t, r, plan)
+	if _, err := PrepareGit(t.Context(), r.store, r.client, lock); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StageFiles(t.Context(), r.store, r.client, lock, plan.Files); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishFiles(t.Context(), r.store, r.client, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := r.store.Allocation(t.Context(), plan.WorkspaceID)
+	if err != nil || len(initial.Endpoints) != 1 {
+		t.Fatal("initial allocation missing")
+	}
+	upgraded := "version = 1\n[workspace]\nport_block_size = 4\n[services.api]\npath = \".\"\nenv_file = \".env.local\"\nport = \"PORT\"\n[services.api.env]\nPUBLIC_NAME = \"new\"\nHMR_PORT = \"${services.api.ports.hmr.port}\"\n[services.api.ports.hmr]\nenv = \"HMR_PORT\"\n"
+	upgradeManifest(plan, upgraded, t)
+	result, err := SyncWorkspace(t.Context(), r.store, r.client, plan.WorkspaceID, SyncOptions{})
+	if err != nil || result.Workspace.Generation != 2 {
+		t.Fatalf("endpoint sync failed: %v", err)
+	}
+	allocation, err := r.store.Allocation(t.Context(), plan.WorkspaceID)
+	if err != nil || len(allocation.Endpoints) != 2 {
+		t.Fatal("endpoint not appended")
+	}
+	if allocation.Endpoints[1].Port != initial.Base+1 || allocation.Endpoints[0].Port != initial.Base {
+		t.Fatal("existing endpoint slot changed")
+	}
+	data, err := os.ReadFile(filepath.Join(plan.Path, ".env.local"))
+	if err != nil || !strings.Contains(string(data), "HMR_PORT="+strconv.Itoa(initial.Base+1)+"\n") {
+		t.Fatal("new endpoint not published")
+	}
+	again, err := SyncWorkspace(t.Context(), r.store, r.client, plan.WorkspaceID, SyncOptions{})
+	if err != nil || again.RestartRequired || again.Workspace.Generation != 2 {
+		t.Fatal("second endpoint sync did not converge")
 	}
 }
 

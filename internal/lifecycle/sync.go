@@ -124,8 +124,22 @@ func prepareSyncPlan(ctx context.Context, s *state.Store, g *git.Client, lock *s
 		}
 		return syncPlan{}, err
 	}
+	allocation, additions, err := syncTopologyAndEndpoints(&step.Workspace.Manifest, manifest, allocation)
+	if err != nil {
+		return syncPlan{}, err
+	}
 	if err := ports.CheckEndpoints(ctx, allocation, nil); err != nil {
 		return syncPlan{}, err
+	}
+	for _, endpoint := range additions {
+		if err := ports.ProbeTCP(ctx, endpoint.Port); err != nil {
+			return syncPlan{}, err
+		}
+	}
+	if len(additions) != 0 {
+		if err := lock.AppendSyncEndpoints(ctx, additions); err != nil {
+			return syncPlan{}, err
+		}
 	}
 	resources, err := lock.Resources(ctx)
 	if err != nil {
@@ -150,13 +164,48 @@ func prepareSyncPlan(ctx context.Context, s *state.Store, g *git.Client, lock *s
 	return syncPlan{HeadOID: checkout.HeadOID, ManifestSHA256: hex.EncodeToString(hash[:]), Manifest: manifest, Owners: model.Owners, Images: model.Images, Unchanged: unchanged}, nil
 }
 
+func syncTopologyAndEndpoints(old, next *config.Manifest, allocation state.Allocation) (state.Allocation, []state.Endpoint, error) {
+	if err := syncTopology(old, next); err != nil {
+		return allocation, nil, err
+	}
+	current := map[[2]string]bool{}
+	for _, endpoint := range allocation.Endpoints {
+		current[[2]string{endpoint.Service, endpoint.Name}] = true
+	}
+	nextSlot := len(allocation.Endpoints)
+	nextAllocation := allocation
+	var additions []state.Endpoint
+	for _, endpoint := range next.Endpoints() {
+		if current[[2]string{endpoint.Service, endpoint.Name}] {
+			continue
+		}
+		service := next.Services[endpoint.Service]
+		addition := state.Endpoint{Service: endpoint.Service, Name: endpoint.Name, Env: endpoint.Env, Host: service.Host, Scheme: service.Scheme, Slot: nextSlot, Port: allocation.Base + nextSlot}
+		if nextSlot >= allocation.Size {
+			return allocation, nil, &domain.Error{Code: "E_PORT_EXHAUSTED", Message: "additive endpoint exceeds the immutable block; create a new workspace"}
+		}
+		additions = append(additions, addition)
+		nextAllocation.Endpoints = append(nextAllocation.Endpoints, addition)
+		nextSlot++
+	}
+	manifestEndpoints := map[[2]string]bool{}
+	for _, endpoint := range next.Endpoints() {
+		manifestEndpoints[[2]string{endpoint.Service, endpoint.Name}] = true
+	}
+	for _, endpoint := range allocation.Endpoints {
+		if !manifestEndpoints[[2]string{endpoint.Service, endpoint.Name}] {
+			return allocation, nil, &domain.Error{Code: "E_CREATION_ONLY_CHANGE", Message: "existing endpoints cannot be removed or renamed"}
+		}
+	}
+	return nextAllocation, additions, nil
+}
 func syncTopology(old, next *config.Manifest) error {
 	bad := func(reason string) error { return &domain.Error{Code: "E_CREATION_ONLY_CHANGE", Message: reason} }
 	if old.Version != next.Version || old.Workspace.PortBlockSize != next.Workspace.PortBlockSize || !slices.Equal(old.Workspace.Copy, next.Workspace.Copy) {
 		return bad("generation, copy set and port-block dimensions must not change during sync")
 	}
 	if !maps.EqualFunc(old.Services, next.Services, func(a, b config.Service) bool {
-		return a.Path == b.Path && a.EnvFile == b.EnvFile && a.Host == b.Host && a.Scheme == b.Scheme && a.Port == b.Port && a.AllowTracked == b.AllowTracked && maps.Equal(a.Ports, b.Ports) && keysSubset(a.Env, b.Env)
+		return a.Path == b.Path && a.EnvFile == b.EnvFile && a.Host == b.Host && a.Scheme == b.Scheme && a.Port == b.Port && a.AllowTracked == b.AllowTracked && extraPortsCompatible(a.Ports, b.Ports) && keysSubset(a.Env, b.Env)
 	}) {
 		return bad("service identities, destinations, listeners and existing environment keys must not move or disappear")
 	}
@@ -170,6 +219,16 @@ func syncTopology(old, next *config.Manifest) error {
 func keysSubset(old, next map[string]string) bool {
 	for key := range old {
 		if _, ok := next[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func extraPortsCompatible(old, next map[string]config.ExtraPort) bool {
+	for name, port := range old {
+		newer, ok := next[name]
+		if !ok || newer.Env != port.Env {
 			return false
 		}
 	}
