@@ -56,6 +56,10 @@ func New(managementToken string, transport http.RoundTripper) (*Client, error) {
 	return client, nil
 }
 func (c *Client) request(ctx context.Context, method, endpoint, authorization string, input, output any) (int, error) {
+	return c.requestWithAbsence(ctx, method, endpoint, authorization, input, output, false)
+}
+
+func (c *Client) requestWithAbsence(ctx context.Context, method, endpoint, authorization string, input, output any, allowNotFound bool) (int, error) {
 	var body io.Reader
 	if input != nil {
 		data, err := json.Marshal(input)
@@ -92,7 +96,10 @@ func (c *Client) request(ctx context.Context, method, endpoint, authorization st
 	case 403:
 		return response.StatusCode, failure("E_PROVIDER_FORBIDDEN", "provider denied this exact operation")
 	case 404:
-		return response.StatusCode, nil
+		if allowNotFound {
+			return response.StatusCode, nil
+		}
+		return response.StatusCode, failure("E_PROVIDER_NOT_FOUND", "provider object is absent; no requested mutation was confirmed")
 	case 409:
 		return response.StatusCode, failure("E_PROVIDER_CONFLICT", "existing provider identity conflicts with the exact intent")
 	case 429:
@@ -110,15 +117,25 @@ func (c *Client) request(ctx context.Context, method, endpoint, authorization st
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponse+1))
 	if err != nil || len(data) > maxResponse {
+		if method != "GET" && method != "HEAD" && method != "DELETE" {
+			return response.StatusCode, failure("E_PROVIDER_AMBIGUOUS", "provider write response was unreadable; outcome was not retried")
+		}
 		return response.StatusCode, failure("E_PROVIDER_CONTRACT", "provider response was unreadable or exceeded 2 MiB")
 	}
 	if output != nil && json.Unmarshal(data, output) != nil {
+		if method != "GET" && method != "HEAD" && method != "DELETE" {
+			return response.StatusCode, failure("E_PROVIDER_AMBIGUOUS", "provider write response was uncertain; outcome was not retried")
+		}
 		return response.StatusCode, failure("E_PROVIDER_CONTRACT", "provider response does not match the pinned wire contract")
 	}
 	return response.StatusCode, nil
 }
 func (c *Client) management(ctx context.Context, method, path string, input, output any) (int, error) {
 	return c.request(ctx, method, ManagementOrigin+path, "Bearer "+c.token, input, output)
+}
+
+func (c *Client) managementWithAbsence(ctx context.Context, method, path string, input, output any) (int, error) {
+	return c.requestWithAbsence(ctx, method, ManagementOrigin+path, "Bearer "+c.token, input, output, true)
 }
 func (c *Client) deployed(ctx context.Context, d Deployment, key, method, path string, input, output any) (int, error) {
 	if !SafeOrigin(d.URL, "cloud") {
@@ -207,7 +224,7 @@ func VerifyDeployment(d Deployment, in Intent) error {
 }
 func (c *Client) Lookup(ctx context.Context, in Intent) (*Deployment, bool, error) {
 	var d Deployment
-	status, err := c.management(ctx, "GET", fmt.Sprintf("/projects/%d/deployment?reference=%s", in.ProjectID, url.QueryEscape(in.Reference)), nil, &d)
+	status, err := c.managementWithAbsence(ctx, "GET", fmt.Sprintf("/projects/%d/deployment?reference=%s", in.ProjectID, url.QueryEscape(in.Reference)), nil, &d)
 	if status == 404 {
 		return nil, false, nil
 	}
@@ -221,7 +238,7 @@ func (c *Client) Lookup(ctx context.Context, in Intent) (*Deployment, bool, erro
 }
 func (c *Client) Inspect(ctx context.Context, in Intent, observed Deployment) (Deployment, error) {
 	var d Deployment
-	status, err := c.management(ctx, "GET", "/deployments/"+observed.Name, nil, &d)
+	status, err := c.managementWithAbsence(ctx, "GET", "/deployments/"+observed.Name, nil, &d)
 	if status == 404 {
 		return Deployment{}, failure("E_PROVIDER_NOT_FOUND", "recorded deployment no longer exists")
 	}
