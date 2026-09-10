@@ -36,6 +36,7 @@ type output struct {
 	Existing        bool                    `json:"existing,omitempty"`
 	Plan            *lifecycle.PlanPreview  `json:"plan,omitempty"`
 	Doctor          *lifecycle.DoctorResult `json:"doctor,omitempty"`
+	Init            *initPreview            `json:"init,omitempty"`
 	Repositories    []repositoryGroup       `json:"repositories,omitempty"`
 	GC              []gcCandidate           `json:"gc_candidates,omitempty"`
 	Auth            map[string]string       `json:"auth,omitempty"`
@@ -79,6 +80,22 @@ type gcCandidate struct {
 	Reason    string    `json:"reason"`
 	Workspace workspace `json:"workspace"`
 	Applied   bool      `json:"applied,omitempty"`
+}
+type initPreview struct {
+	Manifest         string        `json:"manifest"`
+	Evidence         []string      `json:"evidence"`
+	Warnings         []string      `json:"warnings,omitempty"`
+	Services         []initService `json:"services"`
+	HasConvexBackend bool          `json:"has_convex_backend"`
+	Written          bool          `json:"written"`
+}
+type initService struct {
+	ID            string `json:"id"`
+	Path          string `json:"path"`
+	Command       string `json:"command"`
+	Config        string `json:"config"`
+	PublicURL     bool   `json:"public_url"`
+	PublicSiteURL bool   `json:"public_site_url"`
 }
 type verification struct {
 	Configuration string `json:"configuration"`
@@ -131,6 +148,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 	switch args[0] {
 	case "auth":
 		return auth(ctx, args[1:])
+	case "init":
+		return initialize(ctx, args[1:])
 	case "create":
 		return create(ctx, args[1:])
 	case "plan":
@@ -319,6 +338,84 @@ func plan(ctx context.Context, args []string) (*output, error) {
 	human += "no state, workspaces, ports or provider resources created\n"
 	response.Human = human
 	return response, nil
+}
+func initialize(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("init")
+	dry := fs.Bool("dry-run", false, "show the proposal without mutation")
+	write := fs.Bool("write", false, "create eve.toml after review flags")
+	yes := fs.Bool("yes", false, "approve creating this exact manifest")
+	project := fs.String("project", "", "explicit team:project binding when Convex is discovered")
+	if err := fs.Parse(args); err != nil {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid init options"}
+	}
+	if fs.NArg() != 0 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "init runs inside the source checkout"}
+	}
+	g, err := git.New()
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current checkout is inaccessible"}
+	}
+	result, err := lifecycle.ProposeInit(ctx, g, cwd, lifecycle.InitOptions{Project: *project})
+	if err != nil {
+		return nil, err
+	}
+	preview := &initPreview{Manifest: result.ManifestText(), Evidence: result.Evidence, Warnings: result.Warnings, HasConvexBackend: result.HasConvexBackend}
+	for _, service := range result.Services {
+		preview.Services = append(preview.Services, initService{ID: service.ID, Path: service.Path, Command: service.Dev, Config: service.ViteConfig, PublicURL: service.PublicURL, PublicSiteURL: service.PublicSiteURL})
+	}
+	written := false
+	if *write && !*dry {
+		if !*yes {
+			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "review the proposed manifest and rerun init --write --yes"}
+		}
+		if _, err := config.Parse(result.Manifest); err != nil {
+			return nil, err
+		}
+		if err := writeInitManifest(cwd, result.Manifest); err != nil {
+			return nil, err
+		}
+		written = true
+	}
+	preview.Written = written
+	response := &output{SchemaVersion: 1, Command: "init", OK: true, Init: preview}
+	human := result.ManifestText() + "\n"
+	if !written && !*dry {
+		human += "dry-run: no eve.toml written\n"
+	}
+	if written {
+		human += "wrote eve.toml (0600); review/commit it before create\n"
+	}
+	response.Human = human
+	return response, nil
+}
+func writeInitManifest(root string, data []byte) error {
+	owner, err := os.OpenRoot(root)
+	if err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot open source checkout safely", Path: root}
+	}
+	defer owner.Close()
+	if _, err := owner.Stat("eve.toml"); err == nil {
+		return &domain.Error{Code: "E_INIT_EXISTS", Message: "eve.toml already exists", Path: root}
+	}
+	file, err := owner.OpenFile("eve.toml", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot initialize eve.toml without overwriting", Path: root}
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot write eve.toml", Path: root}
+	}
+	if err := file.Sync(); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot sync eve.toml", Path: root}
+	}
+	if err := file.Close(); err != nil {
+		return &domain.Error{Code: "E_FILE_IO", Message: "cannot close eve.toml", Path: root}
+	}
+	return platform.SyncDirectory(root)
 }
 func existingCreate(ctx context.Context, s *state.Store, workspaceInfo state.Workspace, registered bool) (*output, error) {
 	allocation, err := s.Allocation(ctx, workspaceInfo.ID)
@@ -876,7 +973,7 @@ func exitCode(err error) int {
 		return 5
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
-	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED":
+ case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
 		return 3
 	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2

@@ -331,3 +331,68 @@ func TestGCCLIReportsBeforeExactApply(t *testing.T) {
 		t.Fatalf("gc retained candidate: %d %s", code, stdout)
 	}
 }
+
+func TestInitProposalWriteAndPlan(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "source")
+	if err := os.MkdirAll(filepath.Join(root, "apps", "web"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "packages", "backend", "convex"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"apps/web/package.json":         "{\"scripts\":{\"dev\":\"vite\"},\"dependencies\":{\"vite\":\"1.0.0\",\"convex\":\"1.0.0\"}}",
+		"apps/web/vite.config.js":       "import { loadEnv } from 'vite'; export default { server: { port: Number(loadEnv().PORT), strictPort: true } };",
+		"apps/web/main.js":              "const url = import.meta.env.VITE_CONVEX_URL + import.meta.env.VITE_CONVEX_SITE_URL; console.log(url);",
+		"packages/backend/package.json": "{\"scripts\":{\"dev\":\"convex dev\"},\"dependencies\":{\"convex\":\"1.0.0\"}}",
+		"packages/backend/convex.json":  "{}",
+		".gitignore":                    "**/.env.local\n",
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.name", "Init")
+	runGit(t, root, "config", "user.email", "init@example.invalid")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "supported discovery fixture")
+	binary := filepath.Join(base, "eve")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Dir = "."
+	if data, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, data)
+	}
+	code, stdout, _, _ := command(t, binary, root, base, "init", "--json", "--project", "dev-team:app")
+	if code != 0 || !strings.Contains(string(stdout), `"manifest":"# Review before use`) || !strings.Contains(string(stdout), `"has_convex_backend":true`) {
+		t.Fatalf("init dry run: %d %s", code, stdout)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "eve.toml")); !os.IsNotExist(err) {
+		t.Fatal("dry-run wrote manifest")
+	}
+	code, _, stderr, _ := command(t, binary, root, base, "init", "--write", "--project", "dev-team:app")
+	if code != 3 || !strings.Contains(string(stderr), "E_APPROVAL_REQUIRED") {
+		t.Fatalf("unapproved write: %d %s", code, stderr)
+	}
+	code, stdout, _, _ = command(t, binary, root, base, "init", "--write", "--yes", "--json", "--project", "dev-team:app")
+	if code != 0 || !strings.Contains(string(stdout), `"written":true`) {
+		t.Fatalf("init write: %d %s", code, stdout)
+	}
+	if info, err := os.Stat(filepath.Join(root, "eve.toml")); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("manifest mode incorrect")
+	}
+	runGit(t, root, "add", "eve.toml")
+	runGit(t, root, "commit", "-qm", "commit reviewed manifest")
+	code, stdout, _, _ = command(t, binary, root, base, "plan", "--json", "smoke")
+	if code != 0 || !strings.Contains(string(stdout), `"service":"web"`) || !strings.Contains(string(stdout), `dev-team:app`) {
+		t.Fatalf("plan after init: %d %s", code, stdout)
+	}
+	if _, err := os.Lstat(filepath.Join(base, "state", "state.sqlite")); !os.IsNotExist(err) {
+		t.Fatal("init/plan created state")
+	}
+}
