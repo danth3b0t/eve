@@ -37,6 +37,7 @@ type output struct {
 	Services        map[string]service      `json:"services,omitempty"`
 	Resources       map[string]resource     `json:"resources,omitempty"`
 	Verification    *verification           `json:"verification,omitempty"`
+	Timings         map[string]int64        `json:"timings,omitempty"`
 	RestartRequired bool                    `json:"restart_required,omitempty"`
 	Existing        bool                    `json:"existing,omitempty"`
 	Plan            *lifecycle.PlanPreview  `json:"plan,omitempty"`
@@ -368,6 +369,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 		}
 		return nil, &domain.Error{Code: "E_RESUME_REQUIRED", Message: "an active or failed operation already owns that branch; resume it rather than replacing identity", Path: existing.ID}
 	}
+	planStart := time.Now()
 	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
 	if codeOf(planErr) == "E_SOURCE_UNREGISTERED" {
 		if !approved {
@@ -395,13 +397,13 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	prepared, allocation, err := lifecycle.CreateLocal(ctx, s, g, plan, user)
+	created, err := lifecycle.CreateLocal(ctx, s, g, plan, user)
 	if err != nil {
 		return nil, err
 	}
-	response := success("create", prepared)
-	response.setServices(allocation)
-	resourceRows, err := s.Resources(ctx, prepared.ID)
+	response := success("create", created.Workspace)
+	response.setServices(created.Allocation)
+	resourceRows, err := s.Resources(ctx, created.Workspace.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -411,10 +413,20 @@ func create(ctx context.Context, args []string) (*output, error) {
 		data = "provider_empty_initial_state"
 	}
 	response.Verification = &verification{Configuration: "verified", Runtime: "not_checked", Code: "not_verified_by_eve", Data: data}
+	response.Timings = map[string]int64{
+		"plan_ms":         time.Since(planStart).Milliseconds(),
+		"intent_ms":       created.Timings.IntentMS,
+		"reservation_ms":  created.Timings.ReservationMS,
+		"git_ms":          created.Timings.GitMS,
+		"provider_ms":     created.Timings.ProviderMS,
+		"file_staging_ms": created.Timings.FileStagingMS,
+		"publication_ms":  created.Timings.PublicationMS,
+		"create_total_ms": created.Timings.CreateTotalMS,
+	}
 	if registered {
 		response.Warnings = append(response.Warnings, "Registered this canonical source checkout after explicit approval.")
 	}
-	response.Human = fmt.Sprintf("created %s\npath: %s\nUse the project's existing setup/start procedure; stop it before sync or destroy.\n", strconv.Quote(branch), prepared.Path)
+	response.Human = fmt.Sprintf("created %s\npath: %s\nUse the project's existing setup/start procedure; stop it before sync or destroy.\n", strconv.Quote(branch), created.Workspace.Path)
 	return response, nil
 }
 func plan(ctx context.Context, args []string) (*output, error) {

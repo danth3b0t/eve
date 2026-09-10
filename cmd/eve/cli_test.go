@@ -146,6 +146,19 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 			t.Fatal("unapproved create made worktree parent")
 		}
 	}
+	timingCode, timingOut, _, _ := command(t, binary, root, base, "create", "--yes", "--json", "payment-timings")
+	if timingCode != 0 {
+		t.Fatalf("fresh create for timing probe: %d %s", timingCode, timingOut)
+	}
+	for _, key := range []string{`"timings"`, `"plan_ms"`, `"intent_ms"`, `"reservation_ms"`, `"git_ms"`, `"file_staging_ms"`, `"publication_ms"`, `"create_total_ms"`} {
+		if !strings.Contains(string(timingOut), key) {
+			t.Fatalf("create timing %s missing: %s", key, timingOut)
+		}
+	}
+	timingDestroyCode, timingDestroyOut, _, timingDestroyed := command(t, binary, root, base, "destroy", "payment-timings", "--yes", "--json")
+	if timingDestroyCode != 0 || timingDestroyed.Workspace.State != "destroyed" {
+		t.Fatalf("timing workspace not destroyed: %d %s", timingDestroyCode, timingDestroyOut)
+	}
 	ptyPath, err := exec.LookPath("script")
 	if err != nil {
 		t.Skip("util-linux script is unavailable for the PTY approval probe")
