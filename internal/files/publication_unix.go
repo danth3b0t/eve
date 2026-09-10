@@ -123,6 +123,16 @@ func (p *Publisher) observe(ctx context.Context, f PublicationFile) (bool, error
 	return post, nil
 }
 
+// checkDestination repeats only the evidence tied to one mutation. Batch Git
+// policy remains the OpenPublisher and final Check responsibility.
+func (p *Publisher) checkDestination(ctx context.Context, f PublicationFile) (bool, error) {
+	post, err := p.observe(ctx, f)
+	if err != nil {
+		return false, err
+	}
+	return post, p.root.check()
+}
+
 // Check rechecks the whole batch and actual Git policy, including after partial
 // publication. Only receipted exact postimages and exact sibling temps explain
 // visible worktree changes. Unrelated changes and all staged edits are refused.
@@ -258,11 +268,11 @@ func (p *Publisher) Publish(ctx context.Context, name string, record func(domain
 	if i < 0 {
 		return failure("E_PUBLICATION_PLAN", "destination is not in the batch", name)
 	}
-	post, err := p.Check(ctx)
+	f := &p.files[i]
+	post, err := p.checkDestination(ctx, *f)
 	if err != nil {
 		return err
 	}
-	f := &p.files[i]
 	parent, before, err := p.parent(ctx, name)
 	if err != nil {
 		return err
@@ -271,7 +281,7 @@ func (p *Publisher) Publish(ctx context.Context, name string, record func(domain
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if post[name] {
+	if post {
 		return syncParent(parent)
 	} // lost response: exact receipt verified
 	if f.Receipt == nil {
@@ -321,8 +331,12 @@ func (p *Publisher) Publish(ctx context.Context, name string, record func(domain
 		}
 		f.Receipt = receipt
 	}
-	if _, err := p.Check(ctx); err != nil {
+	postImage, err := p.checkDestination(ctx, *f)
+	if err != nil {
 		return err
+	}
+	if postImage {
+		return failure("E_PUBLICATION_RECONCILE", "destination changed before its receipted rename", name)
 	}
 	_, after, err := p.root.inspect(ctx, path.Dir(name))
 	if err != nil {
@@ -345,11 +359,11 @@ func (p *Publisher) Publish(ctx context.Context, name string, record func(domain
 	if err := syncParent(parent); err != nil {
 		return err
 	}
-	post, err = p.Check(ctx)
+	postImage, err = p.checkDestination(ctx, *f)
 	if err != nil {
 		return err
 	}
-	if !post[name] {
+	if !postImage {
 		return failure("E_PUBLICATION_RECONCILE", "published identity/content could not be verified", name)
 	}
 	f.Published = true
