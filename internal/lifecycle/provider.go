@@ -190,6 +190,9 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 	return result, nil
 }
 func configureResourceEnv(ctx context.Context, api convexAdapter, d convex.Deployment, key string, desired map[string]string) error {
+	if len(desired) == 0 {
+		return nil
+	}
 	existing, err := api.Env(ctx, d, key)
 	if err != nil {
 		return err
