@@ -3,11 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"eve/internal/domain"
@@ -18,25 +15,21 @@ var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,47}$`)
 
 func auth(ctx context.Context, args []string) (*output, error) {
 	if len(args) != 2 || args[0] != "convex" || args[1] != "login" {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "usage: eve auth convex login --project team:slug --token-stdin [--profile name]"}
+		return nil, &domain.Error{Code: "E_USAGE", Message: "usage: eve auth convex login --project team:slug [--token-stdin] [--profile name]"}
 	}
 	fs, _ := newFlags("auth")
 	profile := fs.String("profile", "default", "credential profile name")
-	stdin := fs.Bool("token-stdin", false, "read exactly one team token only from standard input")
+	stdin := fs.Bool("token-stdin", false, "read token from standard input instead of the hidden interactive prompt")
 	project := fs.String("project", "", "explicit team:project binding to validate")
 	if err := fs.Parse(args[2:]); err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid auth options"}
 	}
-	if fs.NArg() != 0 || !*stdin || !profileName.MatchString(*profile) || *project == "" {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "auth login requires --project, --token-stdin, and a valid profile name"}
+	if fs.NArg() != 0 || !profileName.MatchString(*profile) || *project == "" {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "auth login requires --project and a valid profile name"}
 	}
-	data, err := io.ReadAll(io.LimitReader(os.Stdin, 16<<10+1))
+	token, err := readTeamToken(ctx, *stdin)
 	if err != nil {
-		return nil, &domain.Error{Code: "E_CREDENTIAL_PROFILE", Message: "credential input could not be read safely"}
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" || strings.ContainsAny(token, "\r\n\x00") {
-		return nil, &domain.Error{Code: "E_PROVIDER_AUTH", Message: "team token input is missing or invalid"}
+		return nil, err
 	}
 	api, err := convex.New(token, nil)
 	if err != nil {
