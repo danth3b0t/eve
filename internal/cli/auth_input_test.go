@@ -35,6 +35,27 @@ func TestTokenInputNeedsTTYOrExplicitStdin(t *testing.T) {
 		t.Fatalf("expected non-TTY refusal, got %v", err)
 	}
 }
+
+func TestAuthLoginDispatchesOptions(t *testing.T) {
+	old := os.Stdin
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = reader
+	defer func() { os.Stdin = old; reader.Close() }()
+
+	// Empty --token-stdin reaches token validation. The pre-fix dispatcher rejected
+	// these same valid options as a malformed auth invocation.
+	_, err = auth(t.Context(), []string{"convex", "login", "--project", "team:project", "--token-stdin"})
+	var d *domain.Error
+	if !errors.As(err, &d) || d.Code != "E_PROVIDER_AUTH" {
+		t.Fatalf("expected token validation error, got %v", err)
+	}
+}
 func TestCancelledInputWins(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

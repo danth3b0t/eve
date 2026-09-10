@@ -14,7 +14,7 @@ import (
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,47}$`)
 
 func auth(ctx context.Context, args []string) (*output, error) {
-	if len(args) != 2 || args[0] != "convex" || (args[1] != "login" && args[1] != "logout") {
+	if len(args) < 2 || args[0] != "convex" || (args[1] != "login" && args[1] != "logout") {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "usage: eve auth convex login|logout [--project team:slug] [--token-stdin] [--profile name]"}
 	}
 	if args[1] == "logout" {
