@@ -56,6 +56,10 @@ type Document struct {
 	eol   string
 }
 
+// Keys returns assignment names only. It never exposes values and therefore
+// supports bounded selector/ownership diagnostics outside Parse's document.
+func (d *Document) Keys() []string { return slices.Sorted(maps.Keys(d.keys)) }
+
 // GeneratedValue reads exactly one portable, unquoted EVE-generated value.
 // It is not a general dotenv evaluator; richer user-authored values are refused.
 func (d *Document) GeneratedValue(key string) (string, error) {

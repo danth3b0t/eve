@@ -68,6 +68,11 @@ func provisionResources(ctx context.Context, s *state.Store, w *state.LockedWork
 	if err != nil {
 		return bindingResult{}, err
 	}
+	if len(resources) != 0 {
+		if err := AuditConvexSelectors(ctx, s, w, manifestWorkspace); err != nil {
+			return bindingResult{}, err
+		}
+	}
 	type preparedResource struct {
 		resource state.Resource
 		api      convexAdapter

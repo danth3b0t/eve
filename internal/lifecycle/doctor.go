@@ -42,6 +42,13 @@ func DoctorWorkspace(ctx context.Context, s *state.Store, g *git.Client, workspa
 	}
 	result := DoctorResult{Workspace: workspace}
 	result.Checks = append(result.Checks, doctorCheck("registry", "pass", "workspace and generation are recorded"))
+	if len(workspace.Manifest.Resources) != 0 {
+		status, evidence := "pass", "ambient and declared Convex selector inputs are confined to EVE-owned resource bindings"
+		if err := AuditConvexSelectors(ctx, s, lock, workspace); err != nil {
+			status, evidence = "fail", "a conflicting Convex selector prevents safe provider routing"
+		}
+		result.Checks = append(result.Checks, doctorCheck("selectors", status, evidence))
+	}
 	identity, identityErr := lock.GitIdentityReceipt(ctx)
 	if identityErr != nil {
 		result.Checks = append(result.Checks, doctorCheck("git", "warning", workspaceGitEvidence(workspace)), doctorCheck("files", "not_checked", "no completed Git identity receipt is recorded yet"))
