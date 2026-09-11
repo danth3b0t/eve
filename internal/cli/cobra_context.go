@@ -30,9 +30,11 @@ type helpContextSnapshot struct {
 	Repository      string
 	Manifest        string
 	Profiles        []string
+	ProfilesStatus  string
 	Workspace       string
 	WorkspaceCount  int
 	UnfinishedCount int
+	CountsAvailable bool
 	Unavailable     []string
 }
 
@@ -44,7 +46,7 @@ func terminalHuman(stdout io.Writer) bool {
 func collectHelpContext(ctx context.Context) helpContextSnapshot {
 	ctx, cancel := context.WithTimeout(ctx, helpContextBudget)
 	defer cancel()
-	snapshot := helpContextSnapshot{Registry: "not_checked", Repository: "outside repository", Manifest: "not_checked"}
+	snapshot := helpContextSnapshot{Registry: "not_checked", Repository: "outside repository", Manifest: "not_checked", ProfilesStatus: "not_checked", WorkspaceCount: -1, UnfinishedCount: -1}
 	paths, err := platform.DefaultPaths()
 	if err != nil {
 		snapshot.Unavailable = append(snapshot.Unavailable, "state path")
@@ -82,7 +84,7 @@ func collectHelpContext(ctx context.Context) helpContextSnapshot {
 		snapshot.Registry = "absent"
 		return snapshot
 	}
-	store, err := state.OpenReadOnly(ctx, snapshot.StatePath)
+	store, err := state.OpenReadOnlyWithBusyTimeout(ctx, snapshot.StatePath, 100)
 	if err != nil {
 		snapshot.Registry = "unavailable"
 		return snapshot
@@ -90,7 +92,9 @@ func collectHelpContext(ctx context.Context) helpContextSnapshot {
 	defer store.Close()
 	snapshot.Registry = "readable"
 	profiles, err := store.ManagementProfiles(ctx, "convex")
+	snapshot.ProfilesStatus = "unavailable"
 	if err == nil {
+		snapshot.ProfilesStatus = "available"
 		for _, profile := range profiles {
 			snapshot.Profiles = append(snapshot.Profiles, profile.Name)
 		}
@@ -102,6 +106,8 @@ func collectHelpContext(ctx context.Context) helpContextSnapshot {
 				snapshot.Repository = repo.SourcePath
 				workspaces, listErr := store.ListWorkspaces(ctx, repo.ID, false)
 				if listErr == nil {
+					snapshot.CountsAvailable = true
+					snapshot.WorkspaceCount = len(workspaces)
 					snapshot.WorkspaceCount = len(workspaces)
 					for _, workspace := range workspaces {
 						if workspace.State != "prepared" && workspace.State != "destroyed" {
@@ -133,15 +139,26 @@ func contextSection(ctx context.Context, options helpOptions) string {
 	fmt.Fprintf(&text, "  Registry evidence: %s\n", snapshot.Registry)
 	fmt.Fprintf(&text, "  Repository: %s\n", snapshot.Repository)
 	fmt.Fprintf(&text, "  Manifest: %s\n", snapshot.Manifest)
-	if len(snapshot.Profiles) == 0 {
-		text.WriteString("  Convex profiles: none recorded\n")
-	} else {
-		fmt.Fprintf(&text, "  Convex profiles: %s recorded; authorization not checked\n", strings.Join(snapshot.Profiles, ", "))
+	switch snapshot.ProfilesStatus {
+	case "available":
+		if len(snapshot.Profiles) == 0 {
+			text.WriteString("  Convex profiles: none recorded (enumeration succeeded)\n")
+		} else {
+			fmt.Fprintf(&text, "  Convex profiles: %s recorded; authorization not checked\n", strings.Join(snapshot.Profiles, ", "))
+		}
+	case "not_checked":
+		text.WriteString("  Convex profiles: not checked\n")
+	default:
+		text.WriteString("  Convex profiles: unavailable\n")
 	}
 	if snapshot.Workspace != "" {
 		fmt.Fprintf(&text, "  Current recorded workspace: %s\n", snapshot.Workspace)
 	}
-	fmt.Fprintf(&text, "  Live workspace records: %d; unfinished operations: %d\n", snapshot.WorkspaceCount, snapshot.UnfinishedCount)
+	if snapshot.CountsAvailable {
+		fmt.Fprintf(&text, "  Live workspace records: %d; unfinished operations: %d\n", snapshot.WorkspaceCount, snapshot.UnfinishedCount)
+	} else {
+		text.WriteString("  Live workspace records: unavailable; unfinished operations: unavailable\n")
+	}
 	text.WriteString("  Saved records are not proof of current files, credentials, processes, or remote deployment state.\n")
 	return text.String()
 }

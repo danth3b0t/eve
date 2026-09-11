@@ -4,9 +4,7 @@ package cli
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -39,6 +37,8 @@ type output struct {
 	Verification    *verification                   `json:"verification,omitempty"`
 	Timings         map[string]int64                `json:"timings,omitempty"`
 	Effects         []commandEffect                 `json:"effects,omitempty"`
+	Help            *helpReference                  `json:"help,omitempty"`
+	Setup           *completionSetupGuide           `json:"setup,omitempty"`
 	RestartRequired bool                            `json:"restart_required,omitempty"`
 	Existing        bool                            `json:"existing,omitempty"`
 	Plan            *lifecycle.PlanPreview          `json:"plan,omitempty"`
@@ -147,102 +147,15 @@ type commandError struct {
 // Run is return-code oriented. Mutation requires the explicit flags shown in
 // usage; EVE never launches applications or edits scripts from this command.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	jsonMode := len(args) > 0 && wantsJSON(args[1:])
 	if len(args) == 1 && args[0] == "--version" {
 		args = []string{"version"}
 	}
-	routedCode, err := runCobra(ctx, args, stdout, stderr)
+	code, err := runCobra(ctx, args, stdout, stderr)
 	if err != nil {
-		code := exitCode(err)
-		response := errorResult(commandName(args), err)
-		if jsonMode {
-			_ = json.NewEncoder(stdout).Encode(response)
-		} else {
-			_, _ = fmt.Fprintf(stderr, "error: %s: %s\n", response.Error.Code, response.Error.Message)
-			if response.Error.NextAction != "" {
-				_, _ = fmt.Fprintf(stderr, "next: %s\n", response.Error.NextAction)
-			}
-			if response.Error.Code == "E_USAGE" {
-				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|keys|path|status|doctor|sync|resume|destroy|gc|list|auth|init|completion|help> [command options] [workspace]")
-			}
-		}
-		return code
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
 	}
-	return routedCode
-}
-func run(ctx context.Context, args []string) (*output, error) {
-	if len(args) == 0 {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "a command is required"}
-	}
-	switch args[0] {
-	case "version":
-		return &output{SchemaVersion: 1, Command: "version", OK: true, Version: Version, Human: "eve " + Version + "\n"}, nil
-	case "auth":
-		return auth(ctx, args[1:])
-	case "init":
-		return initialize(ctx, args[1:])
-	case "create":
-		return create(ctx, args[1:])
-	case "plan":
-		return plan(ctx, args[1:])
-	case "keys":
-		return keys(ctx, args[1:])
-	case "path":
-		return inspect(ctx, args[1:], true)
-	case "status":
-		return inspect(ctx, args[1:], false)
-	case "resume":
-		return resume(ctx, args[1:])
-	case "sync":
-		return sync(ctx, args[1:])
-	case "list":
-		return list(ctx, args[1:])
-	case "doctor":
-		return doctor(ctx, args[1:])
-	case "gc":
-		return gc(ctx, args[1:])
-	case "destroy":
-		return destroy(ctx, args[1:])
-	default:
-		return nil, &domain.Error{Code: "E_USAGE", Message: "unknown command"}
-	}
-}
-func newFlags(command string) (*flag.FlagSet, *bool) {
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	return fs, fs.Bool("json", false, "emit the versioned JSON result")
-}
-func wantsJSON(args []string) bool {
-	for _, arg := range args {
-		if arg == "--json" {
-			return true
-		}
-	}
-	return false
-}
-
-// parseCommandFlags supports the documented grammar in both orders: an
-// operation selector before command flags, or flags before the selector.
-func parseCommandFlags(fs *flag.FlagSet, args []string) ([]string, error) {
-	var positional []string
-	for len(args) != 0 {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		rest := fs.Args()
-		if len(rest) == 0 {
-			return positional, nil
-		}
-		positional = append(positional, rest[0])
-		args = rest[1:]
-	}
-	return positional, nil
-}
-func commandName(args []string) string {
-	if len(args) == 0 {
-		return "eve"
-	}
-	return args[0]
+	return code
 }
 
 func storeFor(ctx context.Context, writable bool) (*git.Client, *state.Store, error) {
@@ -304,38 +217,23 @@ func loadConfig() (config.UserConfig, error) {
 	return config.ParseUser(data)
 }
 
-func createDryRunPreview(ctx context.Context, branch, from string) (*output, error) {
-	args := []string{branch}
-	if from != "" {
-		args = []string{"--from", from, branch}
-	}
-	result, err := plan(ctx, args)
+func createDryRunPreview(ctx context.Context, opts *commandOptions, branch string) (*output, error) {
+	result, err := plan(ctx, &commandOptions{From: opts.From, Progress: opts.Progress}, []string{branch})
 	if err != nil {
 		return nil, err
 	}
 	result.Human = "create dry-run preview:\n" + result.Human
 	return result, nil
 }
-func create(ctx context.Context, args []string) (*output, error) {
-	fs, jsonOut := newFlags("create")
-	yes := fs.Bool("yes", false, "approve source registration, allocation and this workspace creation")
-	from := fs.String("from", "", "existing commit/ref for a new branch")
-	dryRun := fs.Bool("dry-run", false, "preview this create without source/worktree/provider/state changes")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid create options"}
-	}
-	if len(positional) != 1 {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "create requires one branch"}
-	}
-	branch := positional[0]
-	if *dryRun {
-		return createDryRunPreview(ctx, branch, *from)
+func create(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	branch := args[0]
+	if opts.DryRun {
+		return createDryRunPreview(ctx, opts, branch)
 	}
 	registered := false
-	approved := *yes
+	approved := opts.Yes
 	reviewed := lifecycle.PlanPreview{}
-	if !approved && !*jsonOut {
+	if !approved && !opts.JSON {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
@@ -373,11 +271,11 @@ func create(ctx context.Context, args []string) (*output, error) {
 				return nil, err
 			}
 		}
-		preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, branch, *from)
+		preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, branch, opts.From)
 		if err != nil {
 			return nil, err
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "Create workspace for %s\nsource: %s\ntarget commit: %s\nmanifest destinations: %d\nNew worktree and provider effects require typed approval.\n", quote(preview.Branch), preview.Source, preview.HeadOID, len(preview.Files.Files))
+		_, _ = fmt.Fprintf(opts.Progress, "Create workspace for %s\nsource: %s\ntarget commit: %s\nmanifest destinations: %d\nNew worktree and provider effects require typed approval.\n", quote(preview.Branch), preview.Source, preview.HeadOID, len(preview.Files.Files))
 		confirmed, err := interactiveYes(ctx, "Create this workspace?")
 		if err != nil {
 			return nil, err
@@ -399,7 +297,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 	}
 	if existing, existingErr := resolveWorkspace(ctx, g, s, branch); existingErr == nil {
 		if existing.State == "prepared" {
-			if *from != "" {
+			if opts.From != "" {
 				return nil, &domain.Error{Code: "E_CREATE_EXISTS", Message: "workspace already exists; --from cannot retarget it"}
 			}
 			return existingCreate(ctx, s, existing, registered)
@@ -407,7 +305,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_RESUME_REQUIRED", Message: "an active or failed operation already owns that branch; resume it rather than replacing identity", Path: existing.ID}
 	}
 	planStart := time.Now()
-	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
+	plan, planErr := lifecycle.PlanGit(ctx, s, g, cwd, branch, opts.From)
 	if codeOf(planErr) == "E_SOURCE_UNREGISTERED" {
 		if !approved {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "first creation would register this canonical source checkout; rerun with --yes after review"}
@@ -416,7 +314,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 			return nil, err
 		}
 		registered = true
-		plan, planErr = lifecycle.PlanGit(ctx, s, g, cwd, branch, *from)
+		plan, planErr = lifecycle.PlanGit(ctx, s, g, cwd, branch, opts.From)
 	}
 	if planErr != nil {
 		return nil, planErr
@@ -428,7 +326,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if !approved {
 		return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "create would allocate and prepare a workspace; rerun with --yes after review"}
 	}
-	if !*yes {
+	if !opts.Yes {
 		manifestDigest := sha256.Sum256(plan.Target.Manifest)
 		if reviewed.Branch != plan.Target.Branch || reviewed.HeadOID != plan.Target.HeadOID || reviewed.ManifestSHA256 != fmt.Sprintf("%x", manifestDigest) {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "target changed after interactive approval; rerun create and review the updated plan"}
@@ -439,8 +337,8 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	created, err := lifecycle.CreateLocalProgress(ctx, s, g, plan, user, func(phaseName string) {
-		if !*jsonOut {
-			_, _ = fmt.Fprintf(os.Stderr, "eve create: %s\n", phaseName)
+		if !opts.JSON && opts.Progress != nil {
+			_, _ = fmt.Fprintf(opts.Progress, "eve create: %s\n", phaseName)
 		}
 	})
 	if err != nil {
@@ -475,16 +373,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 	response.Human = fmt.Sprintf("created %s\npath: %s\nUse the project's existing setup/start procedure; stop it before sync or destroy.\n", strconv.Quote(branch), created.Workspace.Path)
 	return response, nil
 }
-func plan(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("plan")
-	from := fs.String("from", "", "existing commit/ref for a new branch")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid plan options"}
-	}
-	if len(positional) != 1 {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "plan requires one branch"}
-	}
+func plan(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
 	g, err := git.New()
 	if err != nil {
 		return nil, err
@@ -493,7 +382,7 @@ func plan(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
 	}
-	preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, positional[0], *from)
+	preview, err := lifecycle.PlanPreviewForBranch(ctx, g, cwd, args[0], opts.From)
 	if err != nil {
 		return nil, err
 	}
@@ -510,10 +399,8 @@ func plan(ctx context.Context, args []string) (*output, error) {
 	response.Human = human
 	return response, nil
 }
-func keys(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("keys")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil || len(positional) != 0 {
+func keys(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "keys lists variables for the current committed eve.toml only"}
 	}
 	g, err := git.New()
@@ -537,30 +424,16 @@ func keys(ctx context.Context, args []string) (*output, error) {
 	response.Human = human
 	return response, nil
 }
-func initialize(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("init")
-	dry := fs.Bool("dry-run", false, "show the proposal without mutation")
-	write := fs.Bool("write", false, "create eve.toml after review flags")
-	yes := fs.Bool("yes", false, "approve creating this exact manifest")
-	project := fs.String("project", "", "explicit team:project binding when Convex is discovered")
-	convexMode := fs.Bool("convex", false, "initialize or update a Convex resource workflow")
-	backendPath := fs.String("backend-path", "", "explicit discovered Convex package path when candidates are ambiguous")
-	profile := fs.String("profile", "", "Convex credential profile to bind once")
-	siteURLService := fs.String("site-url-service", "", "discovered service whose allocated URL should be the backend SITE_URL override")
-	update := fs.Bool("update", false, "review and update an existing committed eve.toml")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid init options"}
-	}
-	if len(positional) != 0 {
+func initialize(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "init runs inside the source checkout"}
 	}
-	if *profile != "" && !profileName.MatchString(*profile) {
+	if opts.Profile != "" && !profileName.MatchString(opts.Profile) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid credential profile name"}
 	}
-	if (*backendPath != "" || *siteURLService != "") && !*convexMode {
-		convexValue := true
-		convexMode = &convexValue
+	convexMode := opts.Convex
+	if opts.BackendPath != "" || opts.SiteURLService != "" {
+		convexMode = true
 	}
 	g, err := git.New()
 	if err != nil {
@@ -574,12 +447,12 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := lifecycle.ProposeInit(ctx, g, checkout.Identity.Path, lifecycle.InitOptions{Project: *project, CredentialProfile: *profile, Convex: *convexMode, BackendPath: *backendPath, SiteURLService: *siteURLService, Update: *update})
+	result, err := lifecycle.ProposeInit(ctx, g, checkout.Identity.Path, lifecycle.InitOptions{Project: opts.Project, CredentialProfile: opts.Profile, Convex: convexMode, BackendPath: opts.BackendPath, SiteURLService: opts.SiteURLService, Update: opts.Update})
 	if err != nil {
 		return nil, err
 	}
 	if result.HasConvexBackend {
-		credentialName := *profile
+		credentialName := opts.Profile
 		if credentialName == "" {
 			credentialName = "default"
 		}
@@ -594,14 +467,14 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 		preview.Services = append(preview.Services, row)
 	}
 	written := false
-	if *write && !*dry {
-		if !*yes {
+	if opts.Write && !opts.DryRun {
+		if !opts.Yes {
 			return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "review the proposed manifest and rerun init --write --yes"}
 		}
 		if _, err := config.Parse(result.Manifest); err != nil {
 			return nil, err
 		}
-		if *update {
+		if opts.Update {
 			if err := updateInitManifest(checkout.Identity.Path, result.Manifest); err != nil {
 				return nil, err
 			}
@@ -614,7 +487,7 @@ func initialize(ctx context.Context, args []string) (*output, error) {
 	preview.Written = written
 	response := &output{SchemaVersion: 1, Command: "init", OK: true, Init: preview}
 	human := result.ManifestText() + "\n"
-	if !written && !*dry {
+	if !written && !opts.DryRun {
 		human += "dry-run: no eve.toml written\n"
 	}
 	if written {
@@ -733,28 +606,22 @@ func resolveWorkspace(ctx context.Context, g *git.Client, s *state.Store, select
 	}
 	return s.WorkspaceByBranch(ctx, repository.ID, selector)
 }
-func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error) {
+func inspect(ctx context.Context, opts *commandOptions, args []string, pathOnly bool) (*output, error) {
 	command := "status"
 	if pathOnly {
 		command = "path"
 	}
-	fs, _ := newFlags(command)
-	refresh := fs.Bool("refresh", false, "add read-only provider identity checks")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid " + command + " options"}
-	}
-	if *refresh && pathOnly {
+	if opts.Refresh && pathOnly {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "--refresh is valid only for status"}
 	}
-	if len(positional) > 1 {
+	if len(args) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: command + " accepts at most one workspace"}
 	}
 	selector := ""
-	if len(positional) == 1 {
-		selector = positional[0]
+	if len(args) == 1 {
+		selector = args[0]
 	}
-	g, s, err := storeFor(ctx, *refresh)
+	g, s, err := storeFor(ctx, opts.Refresh)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +656,7 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	if len(resourceRows) != 0 {
 		data = "provider_empty_initial_state"
 	}
-	if *refresh {
+	if opts.Refresh {
 		lock, err := s.LockWorkspace(workspaceInfo.ID)
 		if err != nil {
 			return nil, err
@@ -808,20 +675,15 @@ func inspect(ctx context.Context, args []string, pathOnly bool) (*output, error)
 	response.Human = fmt.Sprintf("workspace %s\nbranch: %s\nstate: %s phase=%s generation=%d\npath: %s\n%s%s%s", workspaceInfo.ID, quote(workspaceInfo.Branch), workspaceInfo.State, workspaceInfo.Phase, workspaceInfo.Generation, workspaceInfo.Path, servicesHuman(allocation), resourcesHuman(resourceRows), remoteHuman(response.Remote))
 	return response, nil
 }
-func list(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("list")
-	all := fs.Bool("all", false, "list every registered repository")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid list options"}
-	}
-	if len(positional) != 0 {
+func list(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "list does not accept a workspace selector"}
 	}
 	var g *git.Client
 	var s *state.Store
 	var repos []state.Repository
-	if *all {
+	var err error
+	if opts.All {
 		g, s, err = globalStore(ctx, false)
 	} else {
 		g, s, err = storeFor(ctx, false)
@@ -830,7 +692,7 @@ func list(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	defer s.Close()
-	if *all {
+	if opts.All {
 		repos, err = s.Repositories(ctx)
 		if err != nil {
 			return nil, err
@@ -886,18 +748,11 @@ func cliWorkspace(w state.Workspace) workspace {
 	return workspace{ID: w.ID, Branch: w.Branch, Path: w.Path, State: w.State, Phase: w.Phase, Generation: w.Generation}
 }
 
-func gc(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("gc")
-	apply := fs.Bool("apply", false, "retry the exact eligible cleanup operations shown")
-	workspaceID := fs.String("workspace", "", "restrict report/apply to this exact workspace UUID")
-	positional, parseErr := parseCommandFlags(fs, args)
-	if parseErr != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid gc options"}
-	}
-	if len(positional) != 0 {
+func gc(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) != 0 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "gc accepts --workspace UUID rather than a positional selector"}
 	}
-	g, s, err := globalStore(ctx, *apply)
+	g, s, err := globalStore(ctx, opts.Apply)
 	if err != nil {
 		return nil, err
 	}
@@ -905,8 +760,8 @@ func gc(ctx context.Context, args []string) (*output, error) {
 	now := time.Now().UnixMilli()
 	response := &output{SchemaVersion: 1, Command: "gc", OK: true}
 	var selectedWorkspaces []state.Workspace
-	if *workspaceID != "" {
-		selected, err := s.Workspace(ctx, *workspaceID)
+	if opts.WorkspaceID != "" {
+		selected, err := s.Workspace(ctx, opts.WorkspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -938,7 +793,7 @@ func gc(ctx context.Context, args []string) (*output, error) {
 		if !include {
 			continue
 		}
-		if *apply && candidate.Eligible {
+		if opts.Apply && candidate.Eligible {
 			result, applyErr := lifecycle.ApplyGC(ctx, s, g, workspaceInfo.ID, lifecycle.GCOptions{})
 			if applyErr != nil {
 				candidate.ErrorCode, candidate.ErrorMessage = errorCodeAndMessage(applyErr)
@@ -1115,20 +970,13 @@ func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now 
 	}
 	return candidate, false, nil
 }
-func sync(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("sync")
-	overwrite := fs.Bool("overwrite-managed", false, "replace an externally edited EVE-managed value")
-	dryRun := fs.Bool("dry-run", false, "resolve supported changes without journaling or writing")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid sync options"}
-	}
-	if len(positional) > 1 {
+func syncWorkspace(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "sync accepts at most one workspace"}
 	}
 	selector := ""
-	if len(positional) == 1 {
-		selector = positional[0]
+	if len(args) == 1 {
+		selector = args[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -1139,7 +987,7 @@ func sync(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := lifecycle.SyncWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.SyncOptions{OverwriteManaged: *overwrite, DryRun: *dryRun})
+	result, err := lifecycle.SyncWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.SyncOptions{OverwriteManaged: opts.Overwrite, DryRun: opts.DryRun})
 	if err != nil {
 		return nil, err
 	}
@@ -1155,7 +1003,7 @@ func sync(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	response.setResources(resources)
-	if *dryRun {
+	if opts.DryRun {
 		if result.RestartRequired {
 			response.Human = fmt.Sprintf("dry-run: sync for workspace %s would produce a new generation; restart_required=true\n", result.Workspace.ID)
 		} else {
@@ -1168,19 +1016,13 @@ func sync(ctx context.Context, args []string) (*output, error) {
 	}
 	return response, nil
 }
-func doctor(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("doctor")
-	remote := fs.Bool("remote", false, "add read-only provider identity checks")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid doctor options"}
-	}
-	if len(positional) > 1 {
+func doctor(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "doctor accepts at most one workspace"}
 	}
 	selector := ""
-	if len(positional) == 1 {
-		selector = positional[0]
+	if len(args) == 1 {
+		selector = args[0]
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -1195,7 +1037,7 @@ func doctor(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	if *remote {
+	if opts.Remote {
 		lock, err := s.LockWorkspace(workspaceInfo.ID)
 		if err != nil {
 			return nil, err
@@ -1236,21 +1078,15 @@ func doctorHuman(result lifecycle.DoctorResult) string {
 	}
 	return human.String()
 }
-func resume(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("resume")
-	dryRun := fs.Bool("dry-run", false, "show the unfinished operation without attempting its remaining effects")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid resume options"}
-	}
-	if len(positional) > 1 {
+func resume(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "resume accepts at most one workspace"}
 	}
 	selector := ""
-	if len(positional) == 1 {
-		selector = positional[0]
+	if len(args) == 1 {
+		selector = args[0]
 	}
-	g, s, err := storeFor(ctx, !*dryRun)
+	g, s, err := storeFor(ctx, !opts.DryRun)
 	if err != nil {
 		return nil, err
 	}
@@ -1259,7 +1095,7 @@ func resume(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	if *dryRun {
+	if opts.DryRun {
 		resourceRows, err := s.Resources(ctx, workspaceInfo.ID)
 		if err != nil {
 			return nil, err
@@ -1292,22 +1128,16 @@ func resume(ctx context.Context, args []string) (*output, error) {
 	}
 	return response, nil
 }
-func destroy(ctx context.Context, args []string) (*output, error) {
-	fs, _ := newFlags("destroy")
-	yes := fs.Bool("yes", false, "approve removal of the exact workspace")
-	discard := fs.Bool("discard-changes", false, "discard reviewed user work in the worktree")
-	dryRun := fs.Bool("dry-run", false, "show the exact planned effects without mutation")
-	assume := fs.Bool("assume-stopped", false, "assert the ordinary project launcher has been stopped/assessed")
-	positional, err := parseCommandFlags(fs, args)
-	if err != nil {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid destroy options"}
-	}
-	if len(positional) > 1 {
+func destroy(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	if len(args) > 1 {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "destroy accepts at most one workspace"}
 	}
 	selector := ""
-	if len(positional) == 1 {
-		selector = positional[0]
+	if len(args) == 1 {
+		selector = args[0]
+	}
+	if strings.HasPrefix(selector, "-") {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "destroy requires a recorded branch, workspace ID, or absolute path"}
 	}
 	g, s, err := storeFor(ctx, true)
 	if err != nil {
@@ -1318,7 +1148,7 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !*yes && !*dryRun {
+	if !opts.Yes && !opts.DryRun {
 		return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "destroy removes the exact worktree and any ignored local files; rerun with --yes after assessing them"}
 	}
 	lock, err := s.LockWorkspace(workspaceInfo.ID)
@@ -1331,7 +1161,7 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	effectsPreview := destroyEffects(workspaceInfo, resourceRows)
-	result, err := lifecycle.DestroyLocal(ctx, s, g, lock, lifecycle.DestroyOptions{Approved: true, DiscardChanges: *discard, AssumeStopped: *assume, DryRun: *dryRun})
+	result, err := lifecycle.DestroyLocal(ctx, s, g, lock, lifecycle.DestroyOptions{Approved: true, DiscardChanges: opts.DiscardChanges, AssumeStopped: opts.AssumeStopped, DryRun: opts.DryRun})
 	if err != nil {
 		return nil, err
 	}
@@ -1340,7 +1170,7 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 	if result.Warning != "" {
 		response.Warnings = []string{result.Warning}
 	}
-	if *dryRun {
+	if opts.DryRun {
 		response.Human = "dry-run preview; no workspace, credential, branch, or remote state changed\n" + effectsHuman(effectsPreview)
 	} else if result.Workspace.State == "cleanup_pending" {
 		response.Human = "cleanup pending: local worktree is gone, but a claimed port still has a listener; assess it and rerun destroy.\n"

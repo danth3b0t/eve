@@ -13,7 +13,7 @@ func TestContextSectionUsesBoundedLocalEvidence(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", base+"/config")
 	t.Setenv("XDG_STATE_HOME", base+"/state")
 	section := contextSection(t.Context(), helpOptions{Interactive: true})
-	for _, required := range []string{"Here:", "State path:", "Registry evidence: absent", "Convex profiles: none recorded", "not proof"} {
+	for _, required := range []string{"Here:", "State path:", "Registry evidence: absent", "Convex profiles: not checked", "Live workspace records: unavailable", "not proof"} {
 		if !strings.Contains(section, required) {
 			t.Fatalf("context missing %q:\n%s", required, section)
 		}

@@ -1,80 +1,73 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
-
-	"eve/internal/domain"
 )
 
 type exitSignal struct{ code int }
 
 func (e exitSignal) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
-type helpSection struct {
-	title string
-	lines []string
-}
-
-type commandMeta struct {
-	Short     string
-	Purpose   string
-	Usage     []string
-	Examples  []string
-	Reads     []string
-	Changes   []string
-	Preserves []string
-}
+type commandHandler func(context.Context, *commandOptions, []string) (*output, error)
 
 type commandRoute struct {
-	name      string
-	leafs     []string
-	short     string
-	handler   func(context.Context, []string) (*output, error)
-	flags     func(*cobra.Command)
-	meta      commandMeta
-	hidden    bool
-	validArgs cobra.CompletionFunc
+	name     string
+	use      string
+	short    string
+	args     cobra.PositionalArgs
+	meta     commandMeta
+	path     []string
+	register func(*cobra.Command, *commandOptions)
+	complete cobra.CompletionFunc
+	handler  commandHandler
+	hidden   bool
 }
 
-func invoke(parts ...string) func(context.Context, []string) (*output, error) {
-	return func(ctx context.Context, args []string) (*output, error) {
-		return run(ctx, append(append([]string{}, parts...), args...))
-	}
-}
-
-func cobraCommand(ctx context.Context, route commandRoute, response **output) *cobra.Command {
+func attachRoute(ctx context.Context, options *commandOptions, route commandRoute) *cobra.Command {
 	command := &cobra.Command{
-		Use:                route.name,
-		Short:              route.short,
-		Long:               renderCommandReference(route.meta),
-		Args:               cobra.ArbitraryArgs,
-		Hidden:             route.hidden,
-		DisableFlagParsing: true,
-		SilenceErrors:      true,
-		SilenceUsage:       true,
-		RunE: func(command *cobra.Command, args []string) error {
-			result, err := route.handler(ctx, args)
-			*response = result
-			if err != nil {
-				return err
-			}
-			return writeSuccess(command.OutOrStdout(), result, wantsJSON(args))
-		},
-		ValidArgsFunction: route.validArgs,
+		Use:               route.use,
+		Short:             route.short,
+		Args:              route.args,
+		Hidden:            route.hidden,
+		SilenceErrors:     true,
+		SilenceUsage:      true,
+		ValidArgsFunction: route.complete,
 	}
-	if route.flags != nil {
-		route.flags(command)
+	metaPath := route.path
+	if len(metaPath) == 0 {
+		metaPath = []string{route.name}
+	}
+	attachCommandMeta(qualifiedPath(metaPath...), route.meta)
+	if route.register != nil {
+		route.register(command, options)
+	}
+	if route.handler == nil {
+		command.RunE = func(command *cobra.Command, args []string) error {
+			return renderCommandHelp(command, helpOptions{NoContext: options.NoContext, Interactive: terminalHuman(command.OutOrStdout())}, options.JSON, command.OutOrStdout())
+		}
+		return command
+	}
+	command.RunE = func(command *cobra.Command, args []string) error {
+		adapterContext := context.WithValue(command.Context(), commandInvocationKey{}, command.CommandPath())
+		adapterContext = context.WithValue(adapterContext, completionRootKey{}, command.Root())
+		command.SetContext(adapterContext)
+		options.Progress = command.ErrOrStderr()
+		result, err := route.handler(adapterContext, options, args)
+		if err != nil {
+			return err
+		}
+		return writeSuccess(command.OutOrStdout(), result, options.JSON)
 	}
 	return command
 }
+
+type commandInvocationKey struct{}
 
 func writeSuccess(stdout io.Writer, result *output, jsonMode bool) error {
 	if result == nil {
@@ -98,235 +91,185 @@ func writeSuccess(stdout io.Writer, result *output, jsonMode bool) error {
 func writeJSON(stdout io.Writer, result any) error {
 	return json.NewEncoder(stdout).Encode(result)
 }
-func newCommandTree(ctx context.Context, buffer **output) *cobra.Command {
+
+func newCommandTree(ctx context.Context, options *commandOptions) *cobra.Command {
 	root := &cobra.Command{
-		Use:                "eve",
-		Short:              "Disposable connected development worktrees",
-		Args:               cobra.ArbitraryArgs,
-		DisableFlagParsing: true,
-		SilenceErrors:      true,
-		SilenceUsage:       true,
-		RunE: func(command *cobra.Command, args []string) error {
-			result := generalHelpResult(helpOptions{Interactive: terminalHuman(command.OutOrStdout())})
-			*buffer = result
-			return writeSuccess(command.OutOrStdout(), result, wantsJSON(args))
-		},
+		Use:                        "eve",
+		Short:                      "Disposable connected development worktrees",
+		Args:                       cobra.NoArgs,
+		SilenceErrors:              true,
+		SilenceUsage:               true,
+		CompletionOptions:          cobra.CompletionOptions{DisableDefaultCmd: true, HiddenDefaultCmd: true},
+		SuggestionsMinimumDistance: 2,
 	}
-	root.SetHelpCommand(&cobra.Command{Hidden: true})
-	commandTreeRoutes(ctx, buffer, root)
+	root.CompletionOptions.SetDefaultShellCompDirective(cobra.ShellCompDirectiveNoFileComp)
+	root.SetContext(ctx)
+	root.PersistentFlags().BoolVarP(&options.NoContext, "no-context", "", false, "omit bounded local evidence from help output")
+	root.Flags().BoolVar(&options.JSON, "json", false, "emit the versioned JSON result")
+	boolFlagValueCompletion(root, "json")
+	boolFlagValueCompletion(root, "no-context")
+	attachCommandMeta(root.CommandPath(), commandMeta{Purpose: "Prepare a connected worktree, publish native configuration, and exit.", Preserves: []string{"application launch commands, unrelated state, and cloud authorization"}, Context: helpContextGeneral})
+	root.RunE = func(command *cobra.Command, args []string) error {
+		return renderCommandHelp(command, helpOptions{NoContext: options.NoContext, Interactive: terminalHuman(command.OutOrStdout())}, options.JSON, command.OutOrStdout())
+	}
+	root.SetHelpFunc(func(command *cobra.Command, args []string) {
+		_ = renderCommandHelp(command, helpOptions{NoContext: options.NoContext, Interactive: terminalHuman(command.OutOrStdout())}, options.JSON, command.OutOrStdout())
+	})
+	commandTreeRoutes(ctx, options, root)
+	registerHelpCommand(root, options)
+	_ = root.Flags().Lookup("json")
 	return root
 }
 
-func commandTreeRoutes(ctx context.Context, buffer **output, root *cobra.Command) {
-	root.AddCommand(cobraCommand(ctx, commandRoute{name: "version", short: "Print command version", meta: simpleReference("Version", "Show the compiled EVE version.", "No repository/provider/state effects."), handler: invoke("version")}, buffer))
-	root.AddCommand(cobraCommand(ctx, commandRoute{name: "help", short: "Explain commands and local evidence limits", meta: simpleReference("Help", "Explain commands, evidence availability, and cleanup behavior.", "Help never opens writable state or contacts a provider."), handler: helpHandler}, buffer))
-	root.AddCommand(completionCommandTree(ctx, buffer))
-	auth := cobraCommand(ctx, commandRoute{name: "auth", short: "Manage local provider credentials", meta: authReference(), handler: invoke("auth")}, buffer)
-	convex := cobraCommand(ctx, commandRoute{name: "convex", short: "Manage Convex credentials", meta: authReference(), handler: invoke("auth", "convex")}, buffer)
-	convex.AddCommand(
-		cobraCommand(ctx, commandRoute{name: "login", short: "Validate and store a team access token", meta: loginReference(), flags: loginFlags, handler: invoke("auth", "convex", "login")}, buffer),
-		cobraCommand(ctx, commandRoute{name: "status", short: "Show stored credential metadata", meta: inspectReference("Credential status", "Show profile metadata without validating liveness"), flags: profileFlags, handler: invoke("auth", "convex", "status")}, buffer),
-		cobraCommand(ctx, commandRoute{name: "logout", short: "Remove a local credential profile", meta: authLogoutReference(), flags: profileFlags, handler: invoke("auth", "convex", "logout")}, buffer),
-	)
+func registerHelpCommand(root *cobra.Command, options *commandOptions) {
+	help := &cobra.Command{
+		Use:   "help [command]",
+		Short: "Explain commands and local evidence limits",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(command *cobra.Command, args []string) error {
+			target, err := helpPathTarget(root, args)
+			if err != nil {
+				return err
+			}
+			return renderCommandHelp(target, helpOptions{NoContext: options.NoContext, Interactive: terminalHuman(command.OutOrStdout())}, options.JSON, command.OutOrStdout())
+		},
+		ValidArgsFunction: helpArgsCompletion,
+	}
+	help.Flags().BoolVar(&options.JSON, "json", false, "emit the versioned JSON result")
+	attachCommandMeta(qualifiedPath("help"), commandMeta{Purpose: "Explain commands, defaults, effects, and local evidence limits.", Arguments: []argumentMeta{{Name: "command", Requirement: "optional", Description: "Command path or help-only state/cleanup topic", Omitted: "root overview"}}, Preserves: []string{"writable state, credentials, provider resources, and user files"}, Examples: []string{"eve help completion", "eve help completion zsh --json"}, Context: helpContextGeneral})
+	root.SetHelpCommand(help)
+}
+
+func helpPathTarget(root *cobra.Command, path []string) (*cobra.Command, error) {
+	current := root
+	for index, name := range path {
+		var next *cobra.Command
+		for _, child := range current.Commands() {
+			if child.Name() == name {
+				next = child
+				break
+			}
+		}
+		if next == nil || (next.Hidden && !(index == 0 && (name == "state" || name == "cleanup"))) {
+			return nil, &scopedUsageError{commandPath: qualifiedPath(path[:index+1]...), message: "unknown help topic", usage: "eve help <command>"}
+		}
+		current = next
+		if current.Hidden && len(path) > index+1 {
+			return nil, &scopedUsageError{commandPath: qualifiedPath(path[:index+1]...), message: "unknown nested help topic", usage: "eve help " + name}
+		}
+	}
+	return current, nil
+}
+
+func commandTreeRoutes(ctx context.Context, options *commandOptions, root *cobra.Command) {
+	auth := attachRoute(ctx, options, commandRoute{name: "auth", use: "auth", short: "Manage local provider credentials", args: cobra.NoArgs, meta: authReference()})
+	convex := attachRoute(ctx, options, commandRoute{name: "convex", use: "convex", short: "Manage Convex credentials", args: cobra.NoArgs, meta: authReference(), path: []string{"auth", "convex"}})
+	login := attachRoute(ctx, options, commandRoute{name: "login", use: "login --project <team:project> --profile <name> [--token-stdin]", short: "Validate and store a team access token", args: cobra.NoArgs, meta: loginReference(), path: []string{"auth", "convex", "login"}, register: loginFlags, complete: flagsOnlyCompletion, handler: func(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+		return authLogin(ctx, opts, args, defaultAuthValidator)
+	}})
+	status := attachRoute(ctx, options, commandRoute{name: "status", use: "status [--profile <name>]", short: "Show stored credential metadata", args: cobra.NoArgs, meta: authStatusReference(), path: []string{"auth", "convex", "status"}, register: profileFlags, complete: flagsOnlyCompletion, handler: authStatus})
+	logout := attachRoute(ctx, options, commandRoute{name: "logout", use: "logout [--profile <name>]", short: "Remove a local credential profile", args: cobra.NoArgs, meta: authLogoutReference(), path: []string{"auth", "convex", "logout"}, register: profileFlags, complete: flagsOnlyCompletion, handler: authLogout})
+	convex.AddCommand(login, status, logout)
 	auth.AddCommand(convex)
 	root.AddCommand(auth)
+
+	root.AddCommand(completionCommandTree(ctx, options))
 	for _, route := range commandRoutes() {
-		root.AddCommand(cobraCommand(ctx, route, buffer))
+		root.AddCommand(attachRoute(ctx, options, route))
 	}
 }
 
 func commandRoutes() []commandRoute {
 	return []commandRoute{
-		{name: "create", short: "Create a connected worktree", meta: createReference(), flags: createFlags, handler: invoke("create")},
-		{name: "plan", short: "Preview creation without mutation", meta: planReference(), flags: planFlags, handler: invoke("plan")},
-		{name: "keys", short: "Show committed interpolation variables", meta: keysReference(), flags: jsonOnlyFlags, handler: invoke("keys")},
-		{name: "path", short: "Print a workspace path", meta: inspectReference("Path", "Print the canonical path of one workspace"), flags: selectorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("path")},
-		{name: "status", short: "Show workspace configuration state", meta: statusReference(), flags: statusFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("status")},
-		{name: "resume", short: "Continue an unfinished operation", meta: resumeReference(), flags: resumeFlags, validArgs: workspaceCompletion(completionResume), handler: invoke("resume")},
-		{name: "sync", short: "Apply supported committed configuration changes", meta: syncReference(), flags: syncFlags, validArgs: workspaceCompletion(completionSync), handler: invoke("sync")},
-		{name: "list", short: "List this repository's EVE workspaces", meta: listReference(), flags: listFlags, handler: invoke("list")},
-		{name: "doctor", short: "Diagnose configuration and ownership", meta: doctorReference(), flags: doctorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("doctor")},
-		{name: "gc", short: "Report exact cleanup candidates", meta: gcReference(), flags: gcFlags, handler: invoke("gc")},
-		{name: "destroy", short: "Remove an owned workspace and resources", meta: destroyReference(), flags: destroyFlags, validArgs: workspaceCompletion(completionDestroy), handler: invoke("destroy")},
-		{name: "init", short: "Generate or update eve.toml", meta: initReference(), flags: initFlags, handler: invoke("init")},
-		{name: "state", short: "Context evidence boundaries", meta: simpleReference("State", "Explain recorded versus observed EVE state.", "This reference performs no operation."), hidden: true, handler: topicHandler("State boundaries", "Recorded state is not live-process truth, credential presence is not validation, and expiry is not remote absence.")},
-		{name: "cleanup", short: "Manual deletion recovery", meta: simpleReference("Cleanup", "Explain exact cleanup after manual removal.", "This reference performs no cleanup."), hidden: true, handler: topicHandler("Cleanup boundaries", "Raw deletion leaves EVE records, remote resources, and claims. Help reports evidence; it never authorizes remote deletion.")},
+		{name: "version", use: "version", short: "Print command version", args: cobra.NoArgs, meta: versionReference(), register: jsonOnlyFlags, complete: flagsOnlyCompletion, handler: versionResult},
+		{name: "create", use: "create <branch>", short: "Create a connected worktree", args: exactOne("branch"), meta: createReference(), register: createFlags, complete: createTargetCompletion, handler: create},
+		{name: "plan", use: "plan <branch>", short: "Preview creation without mutation", args: exactOne("branch"), meta: planReference(), register: planFlags, complete: createTargetCompletion, handler: plan},
+		{name: "keys", use: "keys", short: "Show committed interpolation variables", args: cobra.NoArgs, meta: keysReference(), register: jsonOnlyFlags, complete: flagsOnlyCompletion, handler: keys},
+		{name: "path", use: "path [workspace]", short: "Print a workspace path", args: optionalOne("workspace"), meta: pathReference(), register: jsonOnlyFlags, complete: workspaceCompletion(completionSelector), handler: func(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+			return inspect(ctx, opts, args, true)
+		}},
+		{name: "status", use: "status [workspace]", short: "Show workspace configuration state", args: optionalOne("workspace"), meta: statusReference(), register: statusFlags, complete: workspaceCompletion(completionSelector), handler: func(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+			return inspect(ctx, opts, args, false)
+		}},
+		{name: "resume", use: "resume [workspace]", short: "Continue an unfinished operation", args: optionalOne("workspace"), meta: resumeReference(), register: resumeFlags, complete: workspaceCompletion(completionResume), handler: resume},
+		{name: "sync", use: "sync [workspace]", short: "Apply supported committed configuration changes", args: optionalOne("workspace"), meta: syncReference(), register: syncFlags, complete: workspaceCompletion(completionSync), handler: syncWorkspace},
+		{name: "list", use: "list", short: "List this repository's EVE workspaces", args: cobra.NoArgs, meta: listReference(), register: listFlags, complete: flagsOnlyCompletion, handler: list},
+		{name: "doctor", use: "doctor [workspace]", short: "Diagnose configuration and ownership", args: optionalOne("workspace"), meta: doctorReference(), register: doctorFlags, complete: workspaceCompletion(completionSelector), handler: doctor},
+		{name: "gc", use: "gc", short: "Report exact cleanup candidates", args: cobra.NoArgs, meta: gcReference(), register: gcFlags, complete: flagsOnlyCompletion, handler: gc},
+		{name: "destroy", use: "destroy [workspace]", short: "Remove an owned workspace and resources", args: optionalOne("workspace"), meta: destroyReference(), register: destroyFlags, complete: workspaceCompletion(completionDestroy), handler: destroy},
+		{name: "init", use: "init", short: "Generate or update eve.toml", args: cobra.NoArgs, meta: initReference(), register: initFlags, complete: flagsOnlyCompletion, handler: initialize},
+		{name: "state", use: "state", short: "Context evidence boundaries", args: cobra.NoArgs, meta: stateReference(), hidden: true, handler: topicHandler("State boundaries", "Recorded state is not live-process truth, credential presence is not validation, and expiry is not remote absence.")},
+		{name: "cleanup", use: "cleanup", short: "Manual deletion recovery", args: cobra.NoArgs, meta: cleanupReference(), hidden: true, handler: topicHandler("Cleanup boundaries", "Raw deletion leaves EVE records, remote resources, and claims. Help reports evidence; it never authorizes remote deletion.")},
 	}
 }
 
-func helpHandler(ctx context.Context, args []string) (*output, error) {
-	if len(args) == 0 {
-		return generalHelpResult(helpOptionsFromArgs(args)), nil
-	}
-	return referenceForPath(args, helpOptionsFromArgs(args))
-}
-
-func helpOptionsFromArgs(args []string) helpOptions {
-	var options helpOptions
-	for _, arg := range args {
-		if arg == "--no-context" {
-			options.NoContext = true
+func exactOne(name string) cobra.PositionalArgs {
+	return func(command *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("missing required %s", name)
 		}
+		if len(args) != 1 {
+			return fmt.Errorf("%s accepts exactly one %s", command.Name(), name)
+		}
+		return nil
 	}
-	return options
 }
 
-func generalHelpResult(options helpOptions) *output {
-	var text strings.Builder
-	text.WriteString("EVE — disposable connected development worktrees.\n\n")
-	text.WriteString("Usage:\n  eve <command> [options]\n\n")
-	text.WriteString("Setup:\n  init, auth\n\n")
-	text.WriteString("Inspect:\n  plan, keys, list, status, path, doctor\n\nChange:\n  create, sync, resume, destroy, gc\n\nUtility:\n  completion, version, help\n\n")
-	text.WriteString("Ask for details with `eve <command> --help` or `eve help <command>`. Help is read-only and never opens writable authority.\n")
-	text.WriteString(contextSection(context.Background(), options))
-	return &output{SchemaVersion: 1, Command: "help", OK: true, Human: text.String()}
+func optionalOne(name string) cobra.PositionalArgs {
+	return func(command *cobra.Command, args []string) error {
+		if len(args) > 1 {
+			return fmt.Errorf("%s accepts at most one %s", command.Name(), name)
+		}
+		return nil
+	}
 }
 
-func renderCommandReference(meta commandMeta) string {
-	var text strings.Builder
-	fmt.Fprintf(&text, "%s\n", meta.Purpose)
-	if len(meta.Usage) != 0 {
-		text.WriteString("\nUsage:\n")
-		for _, usage := range meta.Usage {
-			fmt.Fprintf(&text, "  eve %s\n", usage)
-		}
+func topicHandler(title, body string) commandHandler {
+	return func(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+		_ = ctx
+		return &output{SchemaVersion: 1, Command: "help " + title, OK: true, Human: "# " + title + "\n\n" + body + "\n"}, nil
 	}
-	appendSection := func(title string, lines []string) {
-		if len(lines) == 0 {
-			return
-		}
-		fmt.Fprintf(&text, "\n%s:\n", title)
-		for _, line := range lines {
-			fmt.Fprintf(&text, "  %s\n", line)
-		}
-	}
-	appendSection("Reads", meta.Reads)
-	appendSection("Changes", meta.Changes)
-	appendSection("Preserves", meta.Preserves)
-	appendSection("Examples", meta.Examples)
-	return text.String()
 }
 
-func simpleReference(title, purpose, effect string) commandMeta {
-	return commandMeta{Short: title, Purpose: purpose, Reads: []string{effect}}
+func versionResult(ctx context.Context, opts *commandOptions, args []string) (*output, error) {
+	_ = ctx
+	return &output{SchemaVersion: 1, Command: "version", OK: true, Version: Version, Human: "eve " + Version + "\n"}, nil
 }
 
 func runCobra(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	if path, ok := helpRequestPath(args); ok {
-		options := helpOptionsFromArgs(args)
-		options.Interactive = terminalHuman(stdout)
-		return writeHelpPath(stdout, path, options)
-	}
-	if len(args) >= 3 && args[0] == "__complete" && (args[len(args)-2] == "--from" || args[len(args)-2] == "--profile" || args[len(args)-2] == "--workspace") {
-		return writeFlagCompletion(ctx, args, stdout, stderr)
-	}
-	var executed *output
-	root := newCommandTree(ctx, &executed)
+	options := newCommandOptions(stderr)
+	root := newCommandTree(ctx, options)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
-	root.SetContext(ctx)
+	jsonMode := parsedJSONMode(root, args)
 	err := root.Execute()
-	if executed != nil {
-		return 0, err
-	}
-	var signal exitSignal
-	if errors.As(err, &signal) {
-		return signal.code, nil
-	}
-	return 0, err
-}
-
-func helpRequestPath(args []string) ([]string, bool) {
-	var path []string
-	for index, arg := range args {
-		if arg == "--" {
-			break
-		}
-		if arg == "--no-context" {
-			continue
-		}
-		if arg == "--help" || arg == "-h" {
-			if len(path) > 1 {
-				switch path[0] {
-				case "auth":
-					if len(path) > 3 {
-						path = path[:3]
-					}
-				default:
-					path = path[:1]
-				}
-			}
-			return path, true
-		}
-		if arg == "help" && index == 0 {
-			if len(args) == 1 {
-				return []string{}, true
-			}
-			for _, topic := range args[1:] {
-				if topic != "--no-context" {
-					path = append(path, topic)
-				}
-			}
-			return path, true
-		}
-		path = append(path, arg)
-	}
-	return nil, false
-}
-
-func writeHelpPath(stdout io.Writer, path []string, options helpOptions) (int, error) {
-	if len(path) == 0 {
-		result := generalHelpResult(options)
-		return 0, writeSuccess(stdout, result, false)
-	}
-	result, err := referenceForPath(path, options)
 	if err != nil {
-		return 0, err
-	}
-	return 0, writeSuccess(stdout, result, false)
-}
-
-func topicHandler(title, body string) func(context.Context, []string) (*output, error) {
-	return func(ctx context.Context, args []string) (*output, error) {
-		return &output{SchemaVersion: 1, Command: "help " + strings.ToLower(title), OK: true, Human: "# " + title + "\n\n" + body + "\n"}, nil
-	}
-}
-
-func commandCompletionScript(ctx context.Context, tree *cobra.Command, shell string) (*output, error) {
-	var buffer bytes.Buffer
-	var err error
-	switch shell {
-	case "bash":
-		err = tree.GenBashCompletionV2(&buffer, true)
-	case "zsh":
-		err = tree.GenZshCompletion(&buffer)
-	default:
-		return nil, &domain.Error{Code: "E_USAGE", Message: "completion supports bash or zsh"}
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &output{SchemaVersion: 1, Command: "completion " + shell, OK: true, Human: buffer.String()}, nil
-}
-
-func completionCommandTree(ctx context.Context, buffer **output) *cobra.Command {
-	command := &cobra.Command{
-		Use:                "completion <bash|zsh>",
-		Short:              "Generate a shell completion script",
-		Args:               cobra.ExactArgs(1),
-		DisableFlagParsing: true,
-		SilenceErrors:      true,
-		SilenceUsage:       true,
-		RunE: func(command *cobra.Command, args []string) error {
-			var result *output
-			result, err := commandCompletionScript(ctx, command.Root(), args[0])
-			*buffer = result
-			if err != nil {
-				return err
+		var signal exitSignal
+		if errors.As(err, &signal) {
+			return signal.code, nil
+		}
+		normalized := normalizeCobraError(root, args, err)
+		var usage *scopedUsageError
+		if errors.As(normalized, &usage) {
+			if writeErr := writeUsageError(stdout, stderr, normalized, jsonMode); writeErr != nil {
+				return 0, writeErr
 			}
-			return writeSuccess(command.OutOrStdout(), result, wantsJSON(args))
-		},
+			return 2, nil
+		}
+		target, _ := commandForArgs(root, args)
+		result := errorResult(target.CommandPath(), normalized)
+		if jsonMode {
+			if writeErr := writeJSON(stdout, result); writeErr != nil {
+				return 0, writeErr
+			}
+		} else {
+			_, _ = fmt.Fprintf(stderr, "error: %s: %s\n", result.Error.Code, result.Error.Message)
+			if result.Error.NextAction != "" {
+				_, _ = fmt.Fprintf(stderr, "next: %s\n", result.Error.NextAction)
+			}
+		}
+		return exitCode(normalized), nil
 	}
-	return command
+	return 0, nil
 }

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -47,18 +49,39 @@ func TestMissingProviderObjectGetsExplicitClosedWorldRouting(t *testing.T) {
 }
 
 func TestCommandFlagsUseDocumentedMixedOrder(t *testing.T) {
-	fs, jsonOut := newFlags("probe")
-	yes := fs.Bool("yes", false, "")
-	refresh := fs.Bool("refresh", false, "")
-	from := fs.String("from", "", "")
-	positionals, err := parseCommandFlags(fs, []string{"feature/test", "--yes", "--refresh", "--from", "main", "--json", "other"})
-	if err != nil {
-		t.Fatal(err)
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	t.Setenv("XDG_CONFIG_HOME", base+"/config")
+	t.Setenv("EVE_ACTIVE_HELP", "0")
+	cases := [][]string{
+		{"create", "feature/test", "--yes", "--from", "main", "--dry-run", "--json", "--help"},
+		{"create", "--from=main", "--yes", "feature/test", "--dry-run", "--json", "--help"},
+		{"status", "feature/test", "--refresh", "--json", "--help"},
+		{"status", "--refresh", "feature/test", "--json", "--help"},
 	}
-	if !*yes || !*refresh || *from != "main" || len(positionals) != 2 || positionals[0] != "feature/test" || positionals[1] != "other" {
-		t.Fatalf("mixed argument order lost: %v", positionals)
-	}
-	if !*jsonOut {
-		t.Fatal("JSON flag was lost")
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		if code := Run(t.Context(), args, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+			t.Fatalf("%v: code=%d stderr=%s", args, code, stderr.String())
+		}
+		var parsed struct {
+			OK   bool `json:"ok"`
+			Help struct {
+				Path    string     `json:"path"`
+				Options []helpFlag `json:"options"`
+			} `json:"help"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil || !parsed.OK || parsed.Help.Path != commandPath(args[0]) {
+			t.Fatalf("help did not use the selected command/flags %v: %v %s", args, err, stdout.String())
+		}
+		jsonOption := false
+		for _, option := range parsed.Help.Options {
+			jsonOption = jsonOption || option.Name == "json"
+		}
+		if !jsonOption {
+			t.Fatalf("actual JSON option absent from help %v: %#v", args, parsed.Help.Options)
+		}
 	}
 }
+
+func commandPath(command string) string { return "eve " + command }

@@ -29,7 +29,8 @@ func TestAuthLoginStoresNamedProfileThroughInjectedValidation(t *testing.T) {
 	defer func() { os.Stdin = old; reader.Close() }()
 
 	called := 0
-	result, err := authLogin(t.Context(), []string{"--project", "init-devs:es-staging", "--profile", "es-fe", "--token-stdin"}, func(ctx context.Context, token, project string) (convex.Project, error) {
+	opts := &commandOptions{Project: "init-devs:es-staging", Profile: "es-fe", TokenStdin: true}
+	result, err := authLogin(t.Context(), opts, nil, func(ctx context.Context, token, project string) (convex.Project, error) {
 		called++
 		if token != "login-probe-token" || project != "init-devs:es-staging" {
 			t.Fatal("login forwarded unexpected profile inputs")
@@ -46,11 +47,11 @@ func TestAuthLoginStoresNamedProfileThroughInjectedValidation(t *testing.T) {
 		t.Fatal("login response exposed a credential")
 	}
 
-	status, err := auth(t.Context(), []string{"convex", "status", "--profile", "es-fe", "--json"})
+	status, err := authStatus(t.Context(), &commandOptions{Profile: "es-fe", JSON: true}, nil)
 	if err != nil || status.Auth["profile"] != "es-fe" {
 		t.Fatalf("named profile status failed: %v %#v", err, status.Auth)
 	}
-	removed, err := auth(t.Context(), []string{"convex", "logout", "--profile", "es-fe", "--json"})
+	removed, err := authLogout(t.Context(), &commandOptions{Profile: "es-fe", JSON: true}, nil)
 	if err != nil || !removed.OK || removed.Auth["profile"] != "es-fe" {
 		t.Fatalf("named profile logout failed: %v %#v", err, removed.Auth)
 	}

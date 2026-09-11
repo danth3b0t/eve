@@ -28,7 +28,7 @@ func TestAuthStatusShowsProfileMetadataWithoutToken(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	result, err := auth(t.Context(), []string{"convex", "status", "--profile", "audit", "--json"})
+	result, err := authStatus(t.Context(), &commandOptions{Profile: "audit", JSON: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

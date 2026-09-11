@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"eve/internal/domain"
+	"eve/internal/provider/convex"
 )
 
 func TestNormalizeTokenBounds(t *testing.T) {
@@ -21,6 +22,7 @@ func TestNormalizeTokenBounds(t *testing.T) {
 		}
 	}
 }
+
 func TestTokenInputNeedsTTYOrExplicitStdin(t *testing.T) {
 	old := os.Stdin
 	reader, writer, err := os.Pipe()
@@ -36,7 +38,7 @@ func TestTokenInputNeedsTTYOrExplicitStdin(t *testing.T) {
 	}
 }
 
-func TestAuthLoginDispatchesOptions(t *testing.T) {
+func TestAuthLoginDispatchesTypedOptions(t *testing.T) {
 	old := os.Stdin
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -48,14 +50,15 @@ func TestAuthLoginDispatchesOptions(t *testing.T) {
 	os.Stdin = reader
 	defer func() { os.Stdin = old; reader.Close() }()
 
-	// Empty --token-stdin reaches token validation. The pre-fix dispatcher rejected
-	// these same valid options as a malformed auth invocation.
-	_, err = auth(t.Context(), []string{"convex", "login", "--project", "team:project", "--token-stdin"})
-	var d *domain.Error
-	if !errors.As(err, &d) || d.Code != "E_PROVIDER_AUTH" {
-		t.Fatalf("expected token validation error, got %v", err)
+	opts := &commandOptions{Project: "team:project", Profile: "default", TokenStdin: true}
+	_, err = authLogin(t.Context(), opts, nil, func(context.Context, string, string) (convex.Project, error) {
+		return convex.Project{}, errors.New("validator should not receive input")
+	})
+	if err == nil {
+		t.Fatal("empty token input accepted")
 	}
 }
+
 func TestCancelledInputWins(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
