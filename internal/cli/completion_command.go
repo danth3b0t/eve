@@ -121,6 +121,62 @@ func replaceRequired(script []byte, old, replacement string, shell string) (stri
 	return stringsReplace(text, old, replacement), nil
 }
 
+const bashFZFCompletion = `
+__eve_fzf_complete()
+{
+    if [[ ${EVE_FZF_COMPLETION-} == 0 ]]; then
+        return 1
+    fi
+
+    local fzfTrigger typed protocolPacket protocolDirective candidateText selected selectionStatus
+    fzfTrigger="${EVE_FZF_COMPLETION_TRIGGER:-${FZF_COMPLETION_TRIGGER:-**}}"
+    [[ -n ${fzfTrigger} ]] || return 1
+    (( ${#lastParam} >= ${#fzfTrigger} )) || return 1
+    typed="${lastParam:0:${#lastParam}-${#fzfTrigger}}"
+    [[ ${lastParam:${#typed}} == "${fzfTrigger}" ]] || return 1
+
+    args=(__complete "${words[@]:1}")
+    if (( ${#args[@]} > 0 )); then
+        args[$((${#args[@]}-1))]="${typed}"
+    else
+        args=("${typed}")
+    fi
+    protocolPacket=$("${requestExecutable}" "${args[@]}" 2>/dev/null)
+    protocolDirective="${protocolPacket##*:}"
+    if [[ ${protocolDirective} == "${protocolPacket}" || ${protocolDirective} != [0-9]* ]]; then
+        out=""
+        directive=4
+        return 0
+    fi
+    candidateText="${protocolPacket%:*}"
+    if [[ -z ${candidateText//$'\n'/} ]]; then
+        out=""
+        directive=4
+        return 0
+    fi
+
+    if declare -F __fzf_comprun > /dev/null 2>&1; then
+        selected=$(printf '%s\n' "${candidateText}" | awk 'index($0, "_activeHelp_ ") != 1' | __fzf_comprun "cli" -q "${typed}" --reverse)
+    elif command -v fzf > /dev/null 2>&1; then
+        selected=$(printf '%s\n' "${candidateText}" | awk 'index($0, "_activeHelp_ ") != 1' | fzf --reverse --query "${typed}")
+    else
+        return 1
+    fi
+    selectionStatus=$?
+    if (( selectionStatus != 0 )) || [[ -z ${selected} ]]; then
+        out=""
+        directive=4
+        return 0
+    fi
+
+    out="${selected%$'\n'}"
+    out="${out}:4"
+    directive=4
+    cur="${typed}"
+}
+
+`
+
 func adaptBashTransport(raw, buffer *bytes.Buffer) error {
 	text := string(raw.Bytes())
 	requestCommand := "__complete"
@@ -128,11 +184,12 @@ func adaptBashTransport(raw, buffer *bytes.Buffer) error {
 		requestCommand = "__completeNoDesc"
 	}
 	replacements := [][2]string{
+		{"# This function calls the eve program to obtain the completion\n", bashFZFCompletion + "# This function calls the eve program to obtain the completion\n"},
 		{"    local requestComp lastParam lastChar args\n", "    local lastParam lastChar args requestExecutable\n"},
-		{"    requestComp=\"${words[0]} " + requestCommand + " ${args[*]}\"\n", "    args=(" + requestCommand + " \"${words[@]:1}\")\n    requestExecutable=\"${words[0]}\"\n"},
+		{"    args=(\"${words[@]:1}\")\n    requestComp=\"${words[0]} " + requestCommand + " ${args[*]}\"\n", "    args=(" + requestCommand + " \"${words[@]:1}\")\n    requestExecutable=\"${words[0]}\"\n"},
 		{"        requestComp=\"${requestComp} ''\"\n", "        args+=(\"\")\n"},
 		{"    if [[ -z ${cur} && ${lastChar} != = ]]; then\n", "    if [[ -z ${cur} && ${lastChar} != = && ${lastParam} != *=* ]]; then\n"},
-		{"    __eve_debug \"Calling ${requestComp}\"\n    # Use eval to handle any environment variables and such\n    out=$(eval \"${requestComp}\" 2>/dev/null)\n", "    __eve_debug \"Calling EVE completion adapter\"\n    out=$(\"${requestExecutable}\" \"${args[@]}\" 2>/dev/null)\n"},
+		{"    __eve_debug \"Calling ${requestComp}\"\n    # Use eval to handle any environment variables and such\n    out=$(eval \"${requestComp}\" 2>/dev/null)\n", "    if __eve_fzf_complete; then\n        return\n    fi\n\n    __eve_debug \"Calling EVE completion adapter\"\n    out=$(\"${requestExecutable}\" \"${args[@]}\" 2>/dev/null)\n"},
 		{"if [[ $(type -t compopt) = \"builtin\" ]]; then\n    complete -o default -F __start_eve eve\nelse\n    complete -o default -o nospace -F __start_eve eve\nfi\n", "complete -o nospace -F __start_eve eve\n"},
 	}
 	for _, replacement := range replacements {

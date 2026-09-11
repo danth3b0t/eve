@@ -87,6 +87,9 @@ func TestCompletionGeneratorsUseCommandTreeOnly(t *testing.T) {
 		if noDescCode != 0 || noDescErr != "" || !strings.Contains(noDescOut, "__completeNoDesc") || strings.Contains(noDescOut, "eval ${requestComp}") || strings.Contains(noDescOut, "eval _describe") {
 			t.Fatalf("%s no-description script: code=%d stderr=%s", shell, noDescCode, noDescErr)
 		}
+		if shell == "bash" && !strings.Contains(stdout, "__eve_fzf_complete") {
+			t.Fatal("Bash script lost the FZF trigger bridge")
+		}
 		probeCode, probeOut, _ := runHelpProbe(t, "__complete", "")
 		probeNoDescCode, probeNoDescOut, _ := runHelpProbe(t, "__completeNoDesc", "")
 		if probeNoDescCode != 0 {

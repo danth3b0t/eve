@@ -56,6 +56,8 @@ Use `--discard-changes` to authorize discarding reviewed user work, and `--assum
 Help and completion share the registered Cobra command/flag grammar. Static help stays available without Git, credentials or a registry; `--no-context` makes output repeatable. Bare information groups such as `eve`, `eve auth`, `eve auth convex`, and `eve completion` return useful guidance with exit 0 rather than invoking a child action.
 
 Use `eve completion setup` before installing completion. It prints shell-specific instructions, uses `$SHELL` only as a labeled hint, and never edits startup files. Bash requires the user-provided `bash-completion` helper (`_get_comp_words_by_ref`); Zsh requires an initialized `compinit` environment. Explicit `eve completion bash` / `eve completion zsh` print reviewed scripts using an argument-preserving transport adapter (no request `eval`), verified in real Bash and Zsh PTY tests.
+
+On Bash, typing the fzf trigger (`**` by default) before Tab opens fzf over EVE's semantic candidates—for example `eve completion **<Tab>`. Normal Tab does not require fzf; set `EVE_FZF_COMPLETION_TRIGGER`, use fzf's trigger variable, or disable the bridge with `EVE_FZF_COMPLETION=0`.
 `keys`, action `effects`, and lifecycle `--dry-run` phases are from the same closed vocabulary: create/change/sync/resume previews never claim actions before mutation and never include secret values. Existing-source branches are preserved; an EVE-created branch is pruned only if it still points exactly at its recorded creation commit, while divergent branches remain.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 

@@ -205,3 +205,45 @@ func TestCompletionIsInertWhenEveDisappears(t *testing.T) {
 		})
 	}
 }
+
+func eraseBackspaces(value string) string {
+	var runes []rune
+	for _, r := range value {
+		if r == '\b' {
+			if len(runes) != 0 {
+				runes = runes[:len(runes)-1]
+			}
+			continue
+		}
+		runes = append(runes, r)
+	}
+	return string(runes)
+}
+
+func TestFZFTriggerSelectsEveCandidate(t *testing.T) {
+	if _, fzfErr := exec.LookPath("fzf"); fzfErr != nil {
+		t.Skip("fzf is unavailable")
+	}
+	if _, err := os.Stat("/usr/share/bash-completion/bash_completion"); err != nil {
+		t.Skip("bash-completion is unavailable")
+	}
+	harness := completionShellHarness(t)
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is unavailable")
+	}
+	steps := []ptyStep{
+		{Text: "source /usr/share/bash-completion/bash_completion\n", Pause: 350 * time.Millisecond},
+		{Text: "source /usr/share/fzf/completion.bash\n", Pause: 350 * time.Millisecond},
+		{Text: "source " + harness.bashScript + "\n", Pause: 350 * time.Millisecond},
+		{Text: "eve completion **\t", WaitFor: "\x08\x08bash", Timeout: 10 * time.Second},
+		{Text: "\003", Pause: 250 * time.Millisecond},
+		{Text: "exit\n"},
+	}
+	t.Setenv("FZF_DEFAULT_OPTS", "--filter=bash")
+	output := interactivePTY(t, bash, []string{"--noprofile", "--norc", "-i"}, filepath.Join(harness.base, "typescript-fzf"), steps, filepath.Dir(harness.binary))
+	normalized := eraseBackspaces(output)
+	if strings.Contains(output, "E_USAGE") || !strings.Contains(normalized, "eve completion bash") {
+		t.Fatalf("FZF trigger did not select EVE's semantic candidate:\n%s", output)
+	}
+}

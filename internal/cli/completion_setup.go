@@ -100,6 +100,8 @@ func shellGuide(shell string) shellSetupGuide {
 		}}}, Verification: []string{
 			"In the real interactive shell, run: complete -p eve",
 			"Then type: eve completion <Tab>",
+			"Optional fuzzy selection on Bash with fzf installed: eve completion **<Tab>. The trigger defaults to fzf's FZF_COMPLETION_TRIGGER or **; override with EVE_FZF_COMPLETION_TRIGGER or disable with EVE_FZF_COMPLETION=0.",
+			"Plain-Tab forward cycling is a Readline keybinding choice: bind '\"\\t\": menu-complete' deliberately in your own inputrc and, optionally, bind '\"\\e[Z\": menu-complete-backward'. EVE never changes terminal key bindings.",
 			"Registration alone is not proof; a real Tab request must work. Lazy loading may register only on the first attempt.",
 		}, Removal: []string{
 			"Current session: complete -r eve",
@@ -158,6 +160,7 @@ func renderCompletionSetupHuman(guide completionSetupGuide) string {
 		if guide.Shell == "bash" {
 			text.WriteString("  - If Tab completion does not change, printing/saving a script does not load it in your current shell.\n")
 			text.WriteString("  - If _get_comp_words_by_ref is missing, load the compatible bash-completion helpers first.\n")
+			text.WriteString("  - If the fzf trigger opens no picker, install the standalone fzf package or disable EVE_FZF_COMPLETION; ordinary Tab completion does not require fzf.\n")
 			text.WriteString("  - If it works in another terminal, running shells do not automatically gain newly written functions.\n")
 		} else {
 			text.WriteString("  - If Tab completion does not change, the script must be sourced after compinit or placed in an fpath loaded by your configuration.\n")
