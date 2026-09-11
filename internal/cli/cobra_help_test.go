@@ -31,6 +31,8 @@ func TestHelpIsReadOnlyOutsideRepositoryAndState(t *testing.T) {
 		{"help", "keys"},
 		{"help", "version"},
 		{"help", "completion"},
+		{"help", "state"},
+		{"help", "cleanup"},
 	} {
 		code, stdout, stderr := runHelpProbe(t, tc...)
 		if code != 0 || stdout == "" || stderr != "" {

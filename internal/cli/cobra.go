@@ -142,7 +142,7 @@ func commandRoutes() []commandRoute {
 		{name: "keys", short: "Show committed interpolation variables", meta: keysReference(), flags: jsonOnlyFlags, handler: invoke("keys")},
 		{name: "path", short: "Print a workspace path", meta: inspectReference("Path", "Print the canonical path of one workspace"), flags: selectorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("path")},
 		{name: "status", short: "Show workspace configuration state", meta: statusReference(), flags: statusFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("status")},
-		{name: "resume", short: "Continue an unfinished operation", meta: resumeReference(), flags: selectorFlags, validArgs: workspaceCompletion(completionResume), handler: invoke("resume")},
+		{name: "resume", short: "Continue an unfinished operation", meta: resumeReference(), flags: resumeFlags, validArgs: workspaceCompletion(completionResume), handler: invoke("resume")},
 		{name: "sync", short: "Apply supported committed configuration changes", meta: syncReference(), flags: syncFlags, validArgs: workspaceCompletion(completionSync), handler: invoke("sync")},
 		{name: "list", short: "List this repository's EVE workspaces", meta: listReference(), flags: listFlags, handler: invoke("list")},
 		{name: "doctor", short: "Diagnose configuration and ownership", meta: doctorReference(), flags: doctorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("doctor")},
