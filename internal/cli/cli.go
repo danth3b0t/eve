@@ -128,7 +128,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 && args[0] == "--version" {
 		args = []string{"version"}
 	}
-	result, err := run(ctx, args)
+	routedCode, err := runCobra(ctx, args, stdout, stderr)
 	if err != nil {
 		code := exitCode(err)
 		response := errorResult(commandName(args), err)
@@ -140,20 +140,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				_, _ = fmt.Fprintf(stderr, "next: %s\n", response.Error.NextAction)
 			}
 			if response.Error.Code == "E_USAGE" {
-				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|keys|path|status|doctor|sync|resume|destroy|gc|list|auth|init> [command options] [workspace]")
+				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|keys|path|status|doctor|sync|resume|destroy|gc|list|auth|init|completion|help> [command options] [workspace]")
 			}
 		}
 		return code
 	}
-	if jsonMode {
-		_ = json.NewEncoder(stdout).Encode(result)
-	} else {
-		_, _ = fmt.Fprint(stdout, result.Human)
-	}
-	if !result.OK {
-		return 3
-	}
-	return 0
+	return routedCode
 }
 func run(ctx context.Context, args []string) (*output, error) {
 	if len(args) == 0 {
