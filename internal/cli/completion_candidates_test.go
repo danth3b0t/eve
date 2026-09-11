@@ -69,6 +69,23 @@ func runGitForCompletion(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v: %v %s", args, err, out)
 	}
 }
+func runDynamicCompletionForTest(t *testing.T, wants []string, args ...string) (int, string, string) {
+	t.Helper()
+	var code int
+	var stdout, stderr string
+	for attempt := 0; attempt < 5; attempt++ {
+		code, stdout, stderr = runCLIForTest(t, args...)
+		foundAll := code == 0
+		for _, want := range wants {
+			foundAll = foundAll && strings.Contains(stdout, want)
+		}
+		if foundAll {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return code, stdout, stderr
+}
 
 func setCompletionOperationState(t *testing.T, stateDir, workspaceID, stateName, phase, command, operationState string) {
 	t.Helper()
@@ -140,7 +157,7 @@ func TestDynamicCompletionPoliciesUseRegisteredTree(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			code, stdout, stderr := runCLIForTest(t, tc.args...)
+			code, stdout, stderr := runDynamicCompletionForTest(t, tc.want, tc.args...)
 			if code != 0 {
 				t.Fatalf("%v: %d %s %s", tc.args, code, stdout, stderr)
 			}
@@ -165,7 +182,7 @@ func TestDynamicCompletionPoliciesUseRegisteredTree(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("unicode create: %d %s %s", code, stdout, stderr)
 	}
-	code, stdout, _ = runCLIForTest(t, "__complete", "status", "功能")
+	code, stdout, _ = runDynamicCompletionForTest(t, []string{unicodeBranch + "\t"}, "__complete", "status", "功能")
 	if code != 0 || !strings.HasPrefix(stdout, unicodeBranch+"\t") {
 		t.Fatalf("unicode insertion identity was altered: %d %s", code, stdout)
 	}
@@ -175,28 +192,22 @@ func TestDynamicCompletionPoliciesUseRegisteredTree(t *testing.T) {
 	}
 
 	setCompletionOperationState(t, filepath.Join(fixture.base, "state"), id, "destroying", "git", "destroy", "pending")
-	code, stdout, _ = runCLIForTest(t, "__complete", "resume", "pay")
+	code, stdout, _ = runDynamicCompletionForTest(t, []string{"payments\t", "continue deletion"}, "__complete", "resume", "pay")
 	if code != 0 || !strings.Contains(stdout, "payments\t") || !strings.Contains(stdout, "continue deletion") {
 		t.Fatalf("resume deletion continuation: %d %s", code, stdout)
 	}
-	code, stdout, _ = runCLIForTest(t, "__complete", "sync", "pay")
+	code, stdout, _ = runDynamicCompletionForTest(t, []string{":4\n"}, "__complete", "sync", "pay")
 	if code != 0 || strings.Contains(stdout, "payments\t") {
 		t.Fatalf("sync suggested destruction state: %d %s", code, stdout)
 	}
 	setCompletionOperationState(t, filepath.Join(fixture.base, "state"), id, "syncing", "git", "sync", "pending")
-	code, stdout, _ = runCLIForTest(t, "__complete", "sync", "pay")
+	code, stdout, _ = runDynamicCompletionForTest(t, []string{"payments\t", "continue sync"}, "__complete", "sync", "pay")
 	if code != 0 || !strings.Contains(stdout, "payments\t") || !strings.Contains(stdout, "continue sync") {
 		t.Fatalf("sync continuation: %d %s", code, stdout)
 	}
 
 	t.Chdir(fixture.base)
-	for attempt := 0; attempt < 5; attempt++ {
-		code, stdout, stderr = runCLIForTest(t, "__complete", "gc", "--workspace", id[:8])
-		if code == 0 && strings.Contains(stdout, id+"\t") && strings.Contains(stdout, ":4\n") {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	code, stdout, stderr = runDynamicCompletionForTest(t, []string{id + "\t", ":4\n"}, "__complete", "gc", "--workspace", id[:8])
 	if code != 0 || !strings.Contains(stdout, id+"\t") || !strings.Contains(stdout, ":4\n") {
 		t.Fatalf("global GC ID completion: %d %s %s", code, stdout, stderr)
 	}
@@ -231,7 +242,7 @@ func TestProfileCompletionReadsNoTokenObject(t *testing.T) {
 		{"__complete", "auth", "convex", "status", "--profile=wo"},
 		{"__complete", "auth", "convex", "login", "--profile", "wo"},
 	} {
-		code, stdout, _ := runCLIForTest(t, args...)
+		code, stdout, _ := runDynamicCompletionForTest(t, []string{"work\t"}, args...)
 		if code != 0 || !strings.Contains(stdout, "work\t") {
 			t.Fatalf("%v: %d %s", args, code, stdout)
 		}
