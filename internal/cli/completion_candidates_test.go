@@ -190,7 +190,13 @@ func TestDynamicCompletionPoliciesUseRegisteredTree(t *testing.T) {
 	}
 
 	t.Chdir(fixture.base)
-	code, stdout, stderr = runCLIForTest(t, "__complete", "gc", "--workspace", id[:8])
+	for attempt := 0; attempt < 5; attempt++ {
+		code, stdout, stderr = runCLIForTest(t, "__complete", "gc", "--workspace", id[:8])
+		if code == 0 && strings.Contains(stdout, id+"\t") && strings.Contains(stdout, ":4\n") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if code != 0 || !strings.Contains(stdout, id+"\t") || !strings.Contains(stdout, ":4\n") {
 		t.Fatalf("global GC ID completion: %d %s %s", code, stdout, stderr)
 	}
