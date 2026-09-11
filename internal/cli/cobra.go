@@ -107,7 +107,7 @@ func newCommandTree(ctx context.Context, buffer **output) *cobra.Command {
 		SilenceErrors:      true,
 		SilenceUsage:       true,
 		RunE: func(command *cobra.Command, args []string) error {
-			result := generalHelpResult(helpOptionsFromArgs(args))
+			result := generalHelpResult(helpOptions{Interactive: terminalHuman(command.OutOrStdout())})
 			*buffer = result
 			return writeSuccess(command.OutOrStdout(), result, wantsJSON(args))
 		},
@@ -161,17 +161,24 @@ func helpHandler(ctx context.Context, args []string) (*output, error) {
 	return referenceForPath(args, helpOptionsFromArgs(args))
 }
 
-func helpOptionsFromArgs(args []string) map[string]bool {
-	return map[string]bool{"no_context": true}
+func helpOptionsFromArgs(args []string) helpOptions {
+	var options helpOptions
+	for _, arg := range args {
+		if arg == "--no-context" {
+			options.NoContext = true
+		}
+	}
+	return options
 }
 
-func generalHelpResult(options map[string]bool) *output {
+func generalHelpResult(options helpOptions) *output {
 	var text strings.Builder
 	text.WriteString("EVE — disposable connected development worktrees.\n\n")
 	text.WriteString("Usage:\n  eve <command> [options]\n\n")
 	text.WriteString("Setup:\n  init, auth\n\n")
 	text.WriteString("Inspect:\n  plan, keys, list, status, path, doctor\n\nChange:\n  create, sync, resume, destroy, gc\n\nUtility:\n  completion, version, help\n\n")
 	text.WriteString("Ask for details with `eve <command> --help` or `eve help <command>`. Help is read-only and never opens writable authority.\n")
+	text.WriteString(contextSection(context.Background(), options))
 	return &output{SchemaVersion: 1, Command: "help", OK: true, Human: text.String()}
 }
 
@@ -206,7 +213,9 @@ func simpleReference(title, purpose, effect string) commandMeta {
 
 func runCobra(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
 	if path, ok := helpRequestPath(args); ok {
-		return writeHelpPath(stdout, path)
+		options := helpOptionsFromArgs(args)
+		options.Interactive = terminalHuman(stdout)
+		return writeHelpPath(stdout, path, options)
 	}
 	if len(args) >= 3 && args[0] == "__complete" && (args[len(args)-2] == "--from" || args[len(args)-2] == "--profile") {
 		return writeFlagCompletion(ctx, args, stdout, stderr)
@@ -232,6 +241,9 @@ func helpRequestPath(args []string) ([]string, bool) {
 	var path []string
 	for index, arg := range args {
 		if arg == "--" {
+			if arg == "--no-context" {
+				continue
+			}
 			break
 		}
 		if arg == "--help" || arg == "-h" {
@@ -259,12 +271,12 @@ func helpRequestPath(args []string) ([]string, bool) {
 	return nil, false
 }
 
-func writeHelpPath(stdout io.Writer, path []string) (int, error) {
+func writeHelpPath(stdout io.Writer, path []string, options helpOptions) (int, error) {
 	if len(path) == 0 {
-		result := generalHelpResult(nil)
+		result := generalHelpResult(options)
 		return 0, writeSuccess(stdout, result, false)
 	}
-	result, err := referenceForPath(path, nil)
+	result, err := referenceForPath(path, options)
 	if err != nil {
 		return 0, err
 	}

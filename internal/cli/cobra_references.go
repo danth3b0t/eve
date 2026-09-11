@@ -77,7 +77,7 @@ func commandReferenceMap() map[string]commandRoute {
 	return routes
 }
 
-func referenceForPath(path []string, options map[string]bool) (*output, error) {
+func referenceForPath(path []string, options helpOptions) (*output, error) {
 	catalog := commandReferenceMap()
 	if len(path) == 0 {
 		return generalHelpResult(options), nil
