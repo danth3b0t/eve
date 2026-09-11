@@ -26,7 +26,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const Version = "0.1.0"
+var Version = "0.1.0"
 
 type output struct {
 	SchemaVersion   int                             `json:"schema_version"`
