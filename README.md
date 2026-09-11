@@ -15,7 +15,7 @@ The guarded CLI supports guided/incremental `init --convex`, `plan`, create phas
 The current reviewable prerelease installs through mise from plain GitHub assets:
 
 ```sh
-mise use -g github:danth3b0t/eve@0.1.0-rc.5
+mise use -g github:danth3b0t/eve@0.1.0-rc.10
 eve version
 ```
 
