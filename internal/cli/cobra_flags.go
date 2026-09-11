@@ -51,6 +51,7 @@ func gcFlags(command *cobra.Command) {
 func destroyFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("yes", false, "approve removal of the exact workspace")
+	command.Flags().Bool("dry-run", false, "show exact planned effects without mutation")
 	command.Flags().Bool("discard-changes", false, "discard reviewed user work in the worktree")
 	command.Flags().Bool("assume-stopped", false, "assert the project launcher has been separately assessed")
 }

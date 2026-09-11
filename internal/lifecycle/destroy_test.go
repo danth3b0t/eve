@@ -58,6 +58,23 @@ func TestDestroyLocalPreservesSourceAndTombstone(t *testing.T) {
 	_, err = DestroyLocal(t.Context(), r.store, r.client, w, DestroyOptions{Approved: true})
 	errorCode(t, err, "E_DESTROY_STATE")
 }
+func TestDestroyDryRunReportsWithoutMutation(t *testing.T) {
+	r, p, w := preparedFixture(t)
+	result, err := DestroyLocal(t.Context(), r.store, r.client, w, DestroyOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Workspace.State != "prepared" || !strings.Contains(result.Warning, "Dry-run preview") {
+		t.Fatalf("dry-run reported mutation: %+v", result)
+	}
+	step, err := w.DestroyStep(t.Context())
+	if err != nil || step.State != "ready" {
+		t.Fatal("dry-run changed destroy eligibility")
+	}
+	if _, err := os.Stat(p.Path); err != nil {
+		t.Fatal("dry-run removed worktree")
+	}
+}
 func TestDestroyUserWorkRequiresExplicitDiscard(t *testing.T) {
 	for _, kind := range []string{"managed-edit", "other-untracked"} {
 		t.Run(kind, func(t *testing.T) {

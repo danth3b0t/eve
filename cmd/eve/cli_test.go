@@ -254,6 +254,13 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if completeCode != 0 || !strings.Contains(string(completeOut), "main") {
 		t.Fatalf("local ref completion: %d %s", completeCode, completeOut)
 	}
+	dryCode, dryOut, _, _ := command(t, binary, root, base, "destroy", "payments", "--dry-run", "--json")
+	if dryCode != 0 || !strings.Contains(string(dryOut), `"effects"`) || !strings.Contains(string(dryOut), `"state":"prepared"`) {
+		t.Fatalf("destroy dry-run: %d %s", dryCode, dryOut)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("dry-run changed the worktree")
+	}
 	code, _, stderr, _ = command(t, binary, root, base, "destroy", path)
 	if code != 3 || !strings.Contains(string(stderr), "E_APPROVAL_REQUIRED") {
 		t.Fatalf("unapproved destroy: %d %s", code, stderr)

@@ -15,9 +15,9 @@ import (
 )
 
 type DestroyOptions struct {
-	Approved, DiscardChanges, AssumeStopped bool
-	Probe                                   ports.Prober  // nil uses real bounded TCP probes
-	ProviderFactory                         convexFactory // test/provider transport injection; nil uses real HTTPS
+	Approved, DiscardChanges, AssumeStopped, DryRun bool
+	Probe                                           ports.Prober  // nil uses real bounded TCP probes
+	ProviderFactory                                 convexFactory // test/provider transport injection; nil uses real HTTPS
 }
 type DestroyResult struct {
 	Workspace state.Workspace
@@ -159,9 +159,12 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 		if err != nil || !absent {
 			return DestroyResult{}, &domain.Error{Code: "E_GIT_RECONCILE", Message: "the recorded removed path returned; no claims are released without verified absence", Path: step.Identity.Path}
 		}
+		if opts.DryRun {
+			return DestroyResult{Workspace: step.Workspace, Warning: "Dry-run preview only; cleanup remains pending and remote/local effects were not performed."}, nil
+		}
 		return finishDestroy(ctx, s, g, w, step)
 	}
-	if !opts.Approved {
+	if !opts.Approved && !opts.DryRun {
 		return DestroyResult{}, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "destroy requires explicit approval; no local mutation was started"}
 	}
 	if step.State == "pre_git_ready" || step.State == "pre_git_inflight" {
@@ -170,6 +173,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 			return DestroyResult{}, err
 		}
 		if step.State == "pre_git_ready" {
+			if opts.DryRun {
+				return DestroyResult{Workspace: step.Workspace, Warning: "Dry-run preview only; the incomplete operation remains unchanged."}, nil
+			}
 			if err := w.StartDestroy(ctx); err != nil {
 				return DestroyResult{}, err
 			}
@@ -202,7 +208,7 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 		result.Warning = check.Warning
 		return result, err
 	}
-	if step.State == "ready" && step.Workspace.State == "prepared" && step.Workspace.Generation == 1 {
+	if step.State == "ready" && step.Workspace.State == "prepared" && step.Workspace.Generation == 1 && !opts.DryRun {
 		// Reconcile any delayed create-image snapshot purge before retaining fingerprints.
 		if _, err := PublishFiles(ctx, s, g, w); err != nil {
 			return DestroyResult{}, err
@@ -213,6 +219,9 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 		return DestroyResult{}, err
 	}
 	if step.State == "inflight" && checkAbsent {
+		if opts.DryRun {
+			return DestroyResult{Workspace: step.Workspace, Warning: "Dry-run preview only; the unfinished destroy operation remains unchanged."}, nil
+		}
 		if err := remoteDestructionForWorkspace(ctx, s, w, step.Workspace, opts); err != nil {
 			return DestroyResult{}, err
 		}
@@ -232,6 +241,10 @@ func DestroyLocal(ctx context.Context, s *state.Store, g *git.Client, w *state.L
 	check, err := destroySafety(ctx, s, g, step, opts, owned)
 	if err != nil {
 		return DestroyResult{}, err
+	}
+	if opts.DryRun {
+		result := DestroyResult{Workspace: step.Workspace, Warning: check.Warning + " Dry-run preview only; no destroy state, files, credentials, remote resources, branches, or claims changed."}
+		return result, nil
 	}
 	if step.State == "ready" {
 		if err := w.StartDestroy(ctx); err != nil {

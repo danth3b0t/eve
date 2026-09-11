@@ -38,6 +38,7 @@ type output struct {
 	Resources       map[string]resource             `json:"resources,omitempty"`
 	Verification    *verification                   `json:"verification,omitempty"`
 	Timings         map[string]int64                `json:"timings,omitempty"`
+	Effects         []commandEffect                 `json:"effects,omitempty"`
 	RestartRequired bool                            `json:"restart_required,omitempty"`
 	Existing        bool                            `json:"existing,omitempty"`
 	Plan            *lifecycle.PlanPreview          `json:"plan,omitempty"`
@@ -82,6 +83,16 @@ type listedWorkspace struct {
 	Workspace workspace           `json:"workspace"`
 	Services  map[string]service  `json:"services,omitempty"`
 	Resources map[string]resource `json:"resources,omitempty"`
+}
+type commandEffect struct {
+	ID          string   `json:"id,omitempty"`
+	Domain      string   `json:"domain"`
+	Action      string   `json:"action"`
+	Target      string   `json:"target"`
+	Keys        []string `json:"keys,omitempty"`
+	Certainty   string   `json:"certainty"`
+	Destructive bool     `json:"destructive"`
+	Reason      string   `json:"reason"`
 }
 type gcScope struct {
 	Mode      string     `json:"mode"`
@@ -394,6 +405,10 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if planErr != nil {
 		return nil, planErr
 	}
+	effectsPreview, err := createEffectsPreview(&plan)
+	if err != nil {
+		return nil, err
+	}
 	if !approved {
 		return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "create would allocate and prepare a workspace; rerun with --yes after review"}
 	}
@@ -412,6 +427,7 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	response := success("create", created.Workspace)
+	response.Effects = effectsPreview
 	response.setServices(created.Allocation)
 	resourceRows, err := s.Resources(ctx, created.Workspace.ID)
 	if err != nil {
@@ -462,6 +478,7 @@ func plan(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	response := &output{SchemaVersion: 1, Command: "plan", OK: true, Plan: &preview}
+	response.Effects = planEffects(preview)
 	human := fmt.Sprintf("plan for %s\nsource: %s\ntarget: %s\n", quote(preview.Branch), preview.Source, preview.HeadOID)
 	if len(preview.Endpoints) != 0 {
 		human += fmt.Sprintf("prospective endpoints: %d\n", len(preview.Endpoints))
@@ -951,6 +968,64 @@ func errorCodeAndMessage(err error) (string, string) {
 	result := errorResult("gc", err)
 	return result.Error.Code, result.Error.Message
 }
+func destroyEffects(w state.Workspace, resources []state.Resource) []commandEffect {
+	effects := []commandEffect{
+		{ID: "worktree", Domain: "worktree", Action: "delete", Target: w.Path, Certainty: "exact", Destructive: true, Reason: "owned workspace directory and ignored files inside it"},
+		{ID: "workspace-claims", Domain: "registry", Action: "release", Target: "workspace port/allocation claims", Certainty: "exact", Destructive: true, Reason: "release only recorded EVE claims after assessment"},
+		{ID: "workspace-history", Domain: "registry", Action: "record", Target: "destruction history", Certainty: "exact", Destructive: false, Reason: "retain owner evidence for recovery"},
+	}
+	for _, resourceRow := range resources {
+		target := resourceRow.RemoteID
+		if target == "" {
+			target = resourceRow.RemoteReference
+		}
+		effects = append(effects, commandEffect{ID: "resource-" + resourceRow.ResourceKey, Domain: "provider", Action: "delete", Target: target, Certainty: "exact", Destructive: true, Reason: "recorded " + resourceRow.Provider + " development resource and workspace-scoped deployment credential"})
+	}
+	return effects
+}
+func effectsHuman(effects []commandEffect) string {
+	var text strings.Builder
+	for _, effect := range effects {
+		target := effect.Target
+		if len(effect.Keys) != 0 {
+			target += " (" + strings.Join(effect.Keys, ",") + ")"
+		}
+		fmt.Fprintf(&text, "  %s %s %s [%s]\n", effect.Domain, effect.Action, target, effect.Reason)
+	}
+	return text.String()
+}
+func planEffects(preview lifecycle.PlanPreview) []commandEffect {
+	effects := []commandEffect{{ID: "worktree", Domain: "worktree", Action: "create", Target: preview.Branch + " @ " + preview.HeadOID, Certainty: "prospective", Destructive: false, Reason: "reviewed target branch or immutable revision"}}
+	for _, endpoint := range preview.Endpoints {
+		effects = append(effects, commandEffect{ID: "endpoint-" + endpoint.Service + "-" + endpoint.Name, Domain: "network", Action: "reserve", Target: endpoint.Service + "/" + endpoint.Name + " (" + endpoint.Scheme + "://" + endpoint.Host + ")", Certainty: "prospective", Destructive: false, Reason: "allocates one immutable workspace slot"})
+	}
+	for _, resource := range preview.Resources {
+		effects = append(effects, commandEffect{ID: "resource-" + resource.Key, Domain: "provider", Action: "create", Target: resource.Provider + ":" + resource.Project, Certainty: "prospective", Destructive: false, Reason: "creates exact isolated development resource and workspace-scoped credential; project defaults remain canonical"})
+	}
+	for _, file := range preview.Files.Files {
+		action := "create"
+		if file.Origin != "new" {
+			action = "update"
+		}
+		effects = append(effects, commandEffect{ID: "file-" + file.Path, Domain: "filesystem", Action: action, Target: file.Path, Keys: file.Keys, Certainty: "prospective", Destructive: file.Tracked, Reason: "only reviewed generated keys in declared native destination"})
+	}
+	return effects
+}
+func createEffectsPreview(plan *lifecycle.GitPlan) ([]commandEffect, error) {
+	manifest, err := config.Parse(plan.Target.Manifest)
+	if err != nil {
+		return nil, err
+	}
+	preview := lifecycle.PlanPreview{Branch: plan.Target.Branch, HeadOID: plan.Target.HeadOID, Files: plan.Files.Report()}
+	for _, endpoint := range manifest.Endpoints() {
+		service := manifest.Services[endpoint.Service]
+		preview.Endpoints = append(preview.Endpoints, lifecycle.PlanEndpoint{Service: endpoint.Service, Name: endpoint.Name, Env: endpoint.Env, Host: service.Host, Scheme: service.Scheme})
+	}
+	for key, resource := range manifest.Resources {
+		preview.Resources = append(preview.Resources, lifecycle.PlanResource{Key: key, Provider: resource.Provider, Project: resource.Project, Path: resource.Path, EnvFile: resource.EnvFile, Profile: resource.CredentialProfile, TTL: resource.TTL, Region: resource.Region})
+	}
+	return planEffects(preview), nil
+}
 
 func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now int64) (gcCandidate, bool, error) {
 	candidate := gcCandidate{Workspace: cliWorkspace(w), Observations: []gcObservation{}}
@@ -1170,6 +1245,7 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("destroy")
 	yes := fs.Bool("yes", false, "approve removal of the exact workspace")
 	discard := fs.Bool("discard-changes", false, "discard reviewed user work in the worktree")
+	dryRun := fs.Bool("dry-run", false, "show the exact planned effects without mutation")
 	assume := fs.Bool("assume-stopped", false, "assert the ordinary project launcher has been stopped/assessed")
 	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
@@ -1191,7 +1267,7 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !*yes {
+	if !*yes && !*dryRun {
 		return nil, &domain.Error{Code: "E_APPROVAL_REQUIRED", Message: "destroy removes the exact worktree and any ignored local files; rerun with --yes after assessing them"}
 	}
 	lock, err := s.LockWorkspace(workspaceInfo.ID)
@@ -1199,15 +1275,23 @@ func destroy(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	defer lock.Close()
-	result, err := lifecycle.DestroyLocal(ctx, s, g, lock, lifecycle.DestroyOptions{Approved: true, DiscardChanges: *discard, AssumeStopped: *assume})
+	resourceRows, err := s.Resources(ctx, workspaceInfo.ID)
+	if err != nil {
+		return nil, err
+	}
+	effectsPreview := destroyEffects(workspaceInfo, resourceRows)
+	result, err := lifecycle.DestroyLocal(ctx, s, g, lock, lifecycle.DestroyOptions{Approved: true, DiscardChanges: *discard, AssumeStopped: *assume, DryRun: *dryRun})
 	if err != nil {
 		return nil, err
 	}
 	response := success("destroy", result.Workspace)
+	response.Effects = effectsPreview
 	if result.Warning != "" {
 		response.Warnings = []string{result.Warning}
 	}
-	if result.Workspace.State == "cleanup_pending" {
+	if *dryRun {
+		response.Human = "dry-run preview; no workspace, credential, branch, or remote state changed\n" + effectsHuman(effectsPreview)
+	} else if result.Workspace.State == "cleanup_pending" {
 		response.Human = "cleanup pending: local worktree is gone, but a claimed port still has a listener; assess it and rerun destroy.\n"
 	} else {
 		response.Human = fmt.Sprintf("destroyed %s\nbranch retained: %s\n", workspaceInfo.ID, quote(result.Workspace.Branch))
