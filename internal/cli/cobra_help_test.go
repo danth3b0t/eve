@@ -75,13 +75,25 @@ func TestCompletionGeneratorsUseCommandTreeOnly(t *testing.T) {
 		t.Setenv("HOME", base)
 		t.Setenv("XDG_CONFIG_HOME", base+"/config")
 		t.Setenv("XDG_STATE_HOME", base+"/state")
+		t.Setenv("EVE_HELP_CONTEXT", "1")
 		code, stdout, stderr := runHelpProbe(t, "completion", shell)
 		if code != 0 || stderr != "" || !strings.Contains(stdout, "__complete") {
 			t.Fatalf("%s completion: code=%d stderr=%s", shell, code, stderr)
 		}
+		if strings.Contains(stdout, "Here:") || strings.Contains(stdout, "Registry evidence") {
+			t.Fatalf("%s script polluted with help context", shell)
+		}
+		noDescCode, noDescOut, noDescErr := runHelpProbe(t, "completion", shell, "--no-descriptions")
+		if noDescCode != 0 || noDescErr != "" || !strings.Contains(noDescOut, "__completeNoDesc") || strings.Contains(noDescOut, "eval ${requestComp}") || strings.Contains(noDescOut, "eval _describe") {
+			t.Fatalf("%s no-description script: code=%d stderr=%s", shell, noDescCode, noDescErr)
+		}
 		probeCode, probeOut, _ := runHelpProbe(t, "__complete", "")
+		probeNoDescCode, probeNoDescOut, _ := runHelpProbe(t, "__completeNoDesc", "")
+		if probeNoDescCode != 0 {
+			t.Fatalf("no-description protocol variant failed: %d %s", probeNoDescCode, probeNoDescOut)
+		}
 		for _, command := range []string{"create", "destroy", "keys", "completion"} {
-			if !strings.Contains(probeOut, command) || probeCode != 0 {
+			if !strings.Contains(probeOut, command) || probeCode != 0 || !strings.Contains(probeNoDescOut, command) {
 				t.Fatalf("%s dynamic command completion missing %s: %d %s", shell, command, probeCode, probeOut)
 			}
 		}
