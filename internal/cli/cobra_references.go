@@ -6,7 +6,7 @@ import (
 )
 
 func createReference() commandMeta {
-	return commandMeta{Short: "Create", Purpose: "Create an owned Git worktree, reserved local allocations, exact cloud development resource and generated native configuration.", Usage: []string{"create <branch> [--from <ref>] [--yes] [--json]"}, Reads: []string{"committed eve.toml and target Git metadata", "recorded source identity and authorized credential profile metadata"}, Changes: []string{"possibly creates one branch and one worktree", "reserves local port/slot claims", "creates exact Convex dev deployment and deployment-scoped key", "writes declared ignored/native destination keys", "journeys registry and ownership evidence"}, Preserves: []string{"canonical source checkout, unrelated branches and deployments", "project development defaults and unrelated env values", "ordinary project scripts loaded in-tree", "management credential profiles and runtime supervision policy"}, Examples: []string{"eve create --yes feature/payments", "eve create --from main --yes feature/review"}}
+	return commandMeta{Short: "Create", Purpose: "Create an owned Git worktree, reserved local allocations, exact cloud development resource and generated native configuration.", Usage: []string{"create <branch> [--from <ref>] [--dry-run] [--yes] [--json]"}, Reads: []string{"committed eve.toml and target Git metadata", "recorded source identity and authorized credential profile metadata"}, Changes: []string{"possibly creates one branch and one worktree", "reserves local port/slot claims", "creates exact Convex dev deployment and deployment-scoped key", "writes declared ignored/native destination keys", "journeys registry and ownership evidence"}, Preserves: []string{"canonical source checkout, unrelated branches and deployments", "project development defaults and unrelated env values", "ordinary project scripts loaded in-tree", "management credential profiles and runtime supervision policy"}, Examples: []string{"eve create --yes feature/payments", "eve create --from main --yes feature/review"}}
 }
 
 func planReference() commandMeta {
@@ -26,11 +26,11 @@ func statusReference() commandMeta {
 }
 
 func resumeReference() commandMeta {
-	return commandMeta{Short: "Resume", Purpose: "Continue an unfinished create, sync, destroy, or cleanup operation strictly from its durable journal.", Usage: []string{"resume <workspace> [--json]"}, Reads: []string{"frozen operation intent and current ownership evidence"}, Changes: []string{"May finish creation, synchronization, deletion, credential purge, or claim release for the recorded operation"}, Preserves: []string{"Workspaces with unrelated operations, provider identity and all recovery evidence"}, Examples: []string{"eve resume feature/payments --json"}}
+	return commandMeta{Short: "Resume", Purpose: "Continue an unfinished create, sync, destroy, or cleanup operation strictly from its durable journal.", Usage: []string{"resume <workspace> [--dry-run] [--json]"}, Reads: []string{"frozen operation intent and current ownership evidence"}, Changes: []string{"May finish creation, synchronization, deletion, credential purge, or claim release for the recorded operation"}, Preserves: []string{"Workspaces with unrelated operations, provider identity and all recovery evidence"}, Examples: []string{"eve resume feature/payments --json"}}
 }
 
 func syncReference() commandMeta {
-	return commandMeta{Short: "Sync", Purpose: "Apply supported committed manifest changes to an existing exact workspace/backend without replacing either.", Usage: []string{"sync <workspace> [--overwrite-managed] [--json]"}, Reads: []string{"current applied manifest, managed HMACs and exact provider/webworkspace identity"}, Changes: []string{"May update owned local keys, supported endpoint additions and declared remote env values"}, Preserves: []string{"resource identity, unrelated unmanaged content, existing allocations, and the immutable creation intent"}, Examples: []string{"eve sync feature/payments"}}
+	return commandMeta{Short: "Sync", Purpose: "Apply supported committed manifest changes to an existing exact workspace/backend without replacing either.", Usage: []string{"sync <workspace> [--overwrite-managed] [--dry-run] [--json]"}, Reads: []string{"current applied manifest, managed HMACs and exact provider/webworkspace identity"}, Changes: []string{"May update owned local keys, supported endpoint additions and declared remote env values"}, Preserves: []string{"resource identity, unrelated unmanaged content, existing allocations, and the immutable creation intent"}, Examples: []string{"eve sync feature/payments --dry-run", "eve sync feature/payments"}}
 }
 
 func listReference() commandMeta {
@@ -73,6 +73,8 @@ func commandReferenceMap() map[string]commandRoute {
 	routes["version"] = commandRoute{name: "version", meta: simpleReference("Version", "Show the compiled EVE version.", "No repository/provider/state effects.")}
 	routes["help"] = commandRoute{name: "help", meta: simpleReference("Help", "Explain commands, evidence availability, and cleanup behavior.", "Help never opens writable state or contacts a provider.")}
 	routes["completion"] = commandRoute{name: "completion", meta: simpleReference("Completion", "Generate a Bash or Zsh completion script.", "Printing a script creates no EVE state; caller redirection may write a shell startup file.")}
+	routes["state"] = commandRoute{name: "state", meta: simpleReference("State", "Explain recorded versus observed EVE state.", "This reference performs no operation."), hidden: true, handler: topicHandler("State boundaries", "Recorded state is not live-process truth, credential presence is not validation, and expiry is not remote absence.")}
+	routes["cleanup"] = commandRoute{name: "cleanup", meta: simpleReference("Cleanup", "Explain exact cleanup after manual removal.", "This reference performs no cleanup."), hidden: true, handler: topicHandler("Cleanup boundaries", "Raw deletion leaves EVE records, remote resources, and claims. Help reports evidence; it never authorizes remote deletion.")}
 	routes["auth"] = commandRoute{name: "auth", meta: authReference()}
 	return routes
 }

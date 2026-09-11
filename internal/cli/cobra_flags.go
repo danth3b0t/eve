@@ -10,8 +10,9 @@ func jsonOnlyFlags(command *cobra.Command) { jsonFlag(command) }
 func createFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("yes", false, "approve source registration, allocation and this workspace creation")
-	localRefCompletion(command)
+	command.Flags().Bool("dry-run", false, "preview this create without state/worktree/provider changes")
 	command.Flags().String("from", "", "existing commit/ref for a new branch")
+	localRefCompletion(command)
 }
 
 func planFlags(command *cobra.Command) {
@@ -22,6 +23,11 @@ func planFlags(command *cobra.Command) {
 
 func selectorFlags(command *cobra.Command) { jsonFlag(command) }
 
+func resumeFlags(command *cobra.Command) {
+	jsonFlag(command)
+	command.Flags().Bool("dry-run", false, "show the unfinished operation without attempting it")
+}
+
 func statusFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("refresh", false, "include read-only provider identity checks")
@@ -30,6 +36,7 @@ func statusFlags(command *cobra.Command) {
 func syncFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("overwrite-managed", false, "replace an externally edited EVE-managed value")
+	command.Flags().Bool("dry-run", false, "resolve supported changes without journaling or writing")
 }
 
 func listFlags(command *cobra.Command) {

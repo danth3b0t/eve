@@ -370,6 +370,10 @@ func TestResumeCLICompletesInterruptedCreate(t *testing.T) {
 	if blockedCode != 3 || blocked.Error.Code != "E_RESUME_REQUIRED" {
 		t.Fatalf("incomplete create selected replacement: %d %s", blockedCode, blockedOut)
 	}
+	dryCode, dryOut, _, _ := command(t, binary, root, base, "resume", "resume-cli", "--dry-run", "--json")
+	if dryCode != 0 || !strings.Contains(string(dryOut), `"effects"`) || !strings.Contains(string(dryOut), `"state":"creating"`) {
+		t.Fatalf("resume dry-run: %d %s", dryCode, dryOut)
+	}
 	code, stdout, _, resumed := command(t, binary, root, base, "resume", "--json", "resume-cli")
 	if code != 0 || !resumed.OK || resumed.Workspace.State != "prepared" || resumed.Workspace.Generation != 1 {
 		t.Fatalf("resume failed: code=%d stdout=%s", code, stdout)
@@ -487,6 +491,10 @@ func TestInitProposalWriteAndPlan(t *testing.T) {
 	code, stdout, _, _ = command(t, binary, root, base, "plan", "--json", "smoke")
 	if code != 0 || !strings.Contains(string(stdout), `"service":"web"`) || !strings.Contains(string(stdout), `dev-team:app`) {
 		t.Fatalf("plan after init: %d %s", code, stdout)
+	}
+	dryCode, dryOut, _, _ := command(t, binary, root, base, "create", "smoke-dry", "--dry-run", "--json")
+	if dryCode != 0 || !strings.Contains(string(dryOut), `"effects"`) || !strings.Contains(string(dryOut), `"plan"`) {
+		t.Fatalf("create dry-run: %d %s", dryCode, dryOut)
 	}
 	if _, err := os.Lstat(filepath.Join(base, "state", "state.sqlite")); !os.IsNotExist(err) {
 		t.Fatal("init/plan created state")

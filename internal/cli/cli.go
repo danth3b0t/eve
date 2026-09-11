@@ -304,10 +304,23 @@ func loadConfig() (config.UserConfig, error) {
 	return config.ParseUser(data)
 }
 
+func createDryRunPreview(ctx context.Context, branch, from string) (*output, error) {
+	args := []string{branch}
+	if from != "" {
+		args = []string{"--from", from, branch}
+	}
+	result, err := plan(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	result.Human = "create dry-run preview:\n" + result.Human
+	return result, nil
+}
 func create(ctx context.Context, args []string) (*output, error) {
 	fs, jsonOut := newFlags("create")
 	yes := fs.Bool("yes", false, "approve source registration, allocation and this workspace creation")
 	from := fs.String("from", "", "existing commit/ref for a new branch")
+	dryRun := fs.Bool("dry-run", false, "preview this create without source/worktree/provider/state changes")
 	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid create options"}
@@ -316,6 +329,9 @@ func create(ctx context.Context, args []string) (*output, error) {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "create requires one branch"}
 	}
 	branch := positional[0]
+	if *dryRun {
+		return createDryRunPreview(ctx, branch, *from)
+	}
 	registered := false
 	approved := *yes
 	reviewed := lifecycle.PlanPreview{}
@@ -968,6 +984,18 @@ func errorCodeAndMessage(err error) (string, string) {
 	result := errorResult("gc", err)
 	return result.Error.Code, result.Error.Message
 }
+func resumeEffects(w state.Workspace, resources []state.Resource) []commandEffect {
+	destructive := w.State == "destroying" || w.State == "cleanup_pending"
+	effects := []commandEffect{{ID: "operation", Domain: "registry", Action: "resume", Target: w.State + " / " + w.Phase, Certainty: "recorded", Destructive: destructive, Reason: "resume continues only the frozen unfinished operation"}}
+	for _, row := range resources {
+		action := "configure"
+		if destructive {
+			action = "delete"
+		}
+		effects = append(effects, commandEffect{ID: "resource-" + row.ResourceKey, Domain: "provider", Action: action, Target: row.RemoteReference, Certainty: "recorded", Destructive: destructive, Reason: "remote effects are constrained to this exact unfinished operation"})
+	}
+	return effects
+}
 func destroyEffects(w state.Workspace, resources []state.Resource) []commandEffect {
 	effects := []commandEffect{
 		{ID: "worktree", Domain: "worktree", Action: "delete", Target: w.Path, Certainty: "exact", Destructive: true, Reason: "owned workspace directory and ignored files inside it"},
@@ -1086,6 +1114,7 @@ func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now 
 func sync(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("sync")
 	overwrite := fs.Bool("overwrite-managed", false, "replace an externally edited EVE-managed value")
+	dryRun := fs.Bool("dry-run", false, "resolve supported changes without journaling or writing")
 	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid sync options"}
@@ -1106,7 +1135,7 @@ func sync(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := lifecycle.SyncWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.SyncOptions{OverwriteManaged: *overwrite})
+	result, err := lifecycle.SyncWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.SyncOptions{OverwriteManaged: *overwrite, DryRun: *dryRun})
 	if err != nil {
 		return nil, err
 	}
@@ -1122,7 +1151,13 @@ func sync(ctx context.Context, args []string) (*output, error) {
 		return nil, err
 	}
 	response.setResources(resources)
-	if result.RestartRequired {
+	if *dryRun {
+		if result.RestartRequired {
+			response.Human = fmt.Sprintf("dry-run: sync for workspace %s would produce a new generation; restart_required=true\n", result.Workspace.ID)
+		} else {
+			response.Human = fmt.Sprintf("dry-run: workspace %s already matches its applied generation\n", result.Workspace.ID)
+		}
+	} else if result.RestartRequired {
 		response.Human = fmt.Sprintf("synced generation %d for workspace %s\nrestart the project with its ordinary command\n", result.Workspace.Generation, result.Workspace.ID)
 	} else {
 		response.Human = fmt.Sprintf("workspace %s already matches generation %d\n", result.Workspace.ID, result.Workspace.Generation)
@@ -1199,6 +1234,7 @@ func doctorHuman(result lifecycle.DoctorResult) string {
 }
 func resume(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("resume")
+	dryRun := fs.Bool("dry-run", false, "show the unfinished operation without attempting its remaining effects")
 	positional, err := parseCommandFlags(fs, args)
 	if err != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid resume options"}
@@ -1210,7 +1246,7 @@ func resume(ctx context.Context, args []string) (*output, error) {
 	if len(positional) == 1 {
 		selector = positional[0]
 	}
-	g, s, err := storeFor(ctx, true)
+	g, s, err := storeFor(ctx, !*dryRun)
 	if err != nil {
 		return nil, err
 	}
@@ -1218,6 +1254,17 @@ func resume(ctx context.Context, args []string) (*output, error) {
 	workspaceInfo, err := resolveWorkspace(ctx, g, s, selector)
 	if err != nil {
 		return nil, err
+	}
+	if *dryRun {
+		resourceRows, err := s.Resources(ctx, workspaceInfo.ID)
+		if err != nil {
+			return nil, err
+		}
+		effects := resumeEffects(workspaceInfo, resourceRows)
+		response := success("resume", workspaceInfo)
+		response.Effects = effects
+		response.Human = "dry-run preview of unfinished operation; no lifecycle effects were attempted\n" + effectsHuman(effects)
+		return response, nil
 	}
 	resumed, err := lifecycle.ResumeWorkspace(ctx, s, g, workspaceInfo.ID, lifecycle.ResumeOptions{})
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 type SyncOptions struct {
 	OverwriteManaged bool
 	ProviderFactory  convexFactory
+	DryRun           bool
 }
 type SyncResult struct {
 	Workspace       state.Workspace
@@ -73,6 +74,11 @@ func syncWorkspaceLocked(ctx context.Context, s *state.Store, g *git.Client, loc
 		plan, err := prepareSyncPlan(ctx, s, g, lock, step, options)
 		if err != nil {
 			return SyncResult{}, err
+		}
+		if options.DryRun {
+			// Preview resolves every local/provider value and endpoint without
+			// journaling intent or performing the first remote/local write.
+			return SyncResult{Workspace: step.Workspace, RestartRequired: !plan.Unchanged}, nil
 		}
 		if plan.Unchanged {
 			return SyncResult{Workspace: step.Workspace, RestartRequired: false}, nil
