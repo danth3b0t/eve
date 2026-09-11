@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,7 +164,12 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Skip("util-linux script is unavailable for the PTY approval probe")
 	}
-	ptyCmd := exec.Command(ptyPath, "-qec", binary+" create payments", "/dev/null")
+	var ptyCmd *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		ptyCmd = exec.Command(ptyPath, "-q", "/dev/null", binary, "create", "payments")
+	} else {
+		ptyCmd = exec.Command(ptyPath, "-qec", binary+" create payments", "/dev/null")
+	}
 	ptyCmd.Dir = root
 	ptyCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(base, "home"), "XDG_CONFIG_HOME=" + filepath.Join(base, "config"), "XDG_STATE_HOME=" + filepath.Join(base, "xdg"), "EVE_STATE_DIR=" + filepath.Join(base, "state"), "GIT_CONFIG_NOSYSTEM=1"}
 	ptyCmd.Stdin = strings.NewReader("yes\n")
