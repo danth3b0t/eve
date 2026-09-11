@@ -10,12 +10,14 @@ func jsonOnlyFlags(command *cobra.Command) { jsonFlag(command) }
 func createFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("yes", false, "approve source registration, allocation and this workspace creation")
+	localRefCompletion(command)
 	command.Flags().String("from", "", "existing commit/ref for a new branch")
 }
 
 func planFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().String("from", "", "existing commit/ref for a new branch")
+	localRefCompletion(command)
 }
 
 func selectorFlags(command *cobra.Command) { jsonFlag(command) }
@@ -69,12 +71,14 @@ func loginFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().String("project", "", "explicit team:project binding")
 	command.Flags().String("profile", "", "credential profile name")
+	profileCompletion(command)
 	command.Flags().Bool("token-stdin", false, "read one token from standard input")
 }
 
 func profileFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().String("profile", "", "credential profile name")
+	profileCompletion(command)
 }
 
 func createSelectorCompletion(command *cobra.Command) {}

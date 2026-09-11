@@ -242,6 +242,18 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if doctorCode != 0 || !doctor.OK || !strings.Contains(string(doctorOut), `"status":"pass"`) || !strings.Contains(string(doctorOut), `"status":"not_checked"`) {
 		t.Fatalf("doctor: %d %s", doctorCode, doctorOut)
 	}
+	completeCode, completeOut, _, _ := command(t, binary, root, base, "__complete", "destroy", "")
+	if completeCode != 0 || !strings.Contains(string(completeOut), "payments") {
+		t.Fatalf("workspace completion: %d %s", completeCode, completeOut)
+	}
+	completeCode, completeOut, _, _ = command(t, binary, root, base, "__complete", "resume", "")
+	if completeCode != 0 || strings.Contains(string(completeOut), "payments") {
+		t.Fatalf("resume completion suggested a completed workspace: %d %s", completeCode, completeOut)
+	}
+	completeCode, completeOut, _, _ = command(t, binary, root, base, "__complete", "create", "--from", "")
+	if completeCode != 0 || !strings.Contains(string(completeOut), "main") {
+		t.Fatalf("local ref completion: %d %s", completeCode, completeOut)
+	}
 	code, _, stderr, _ = command(t, binary, root, base, "destroy", path)
 	if code != 3 || !strings.Contains(string(stderr), "E_APPROVAL_REQUIRED") {
 		t.Fatalf("unapproved destroy: %d %s", code, stderr)

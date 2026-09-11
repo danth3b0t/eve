@@ -140,14 +140,14 @@ func commandRoutes() []commandRoute {
 		{name: "create", short: "Create a connected worktree", meta: createReference(), flags: createFlags, handler: invoke("create")},
 		{name: "plan", short: "Preview creation without mutation", meta: planReference(), flags: planFlags, handler: invoke("plan")},
 		{name: "keys", short: "Show committed interpolation variables", meta: keysReference(), flags: jsonOnlyFlags, handler: invoke("keys")},
-		{name: "path", short: "Print a workspace path", meta: inspectReference("Path", "Print the canonical path of one workspace"), flags: selectorFlags, handler: invoke("path")},
-		{name: "status", short: "Show workspace configuration state", meta: statusReference(), flags: statusFlags, handler: invoke("status")},
-		{name: "resume", short: "Continue an unfinished operation", meta: resumeReference(), flags: selectorFlags, handler: invoke("resume")},
-		{name: "sync", short: "Apply supported committed configuration changes", meta: syncReference(), flags: syncFlags, handler: invoke("sync")},
+		{name: "path", short: "Print a workspace path", meta: inspectReference("Path", "Print the canonical path of one workspace"), flags: selectorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("path")},
+		{name: "status", short: "Show workspace configuration state", meta: statusReference(), flags: statusFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("status")},
+		{name: "resume", short: "Continue an unfinished operation", meta: resumeReference(), flags: selectorFlags, validArgs: workspaceCompletion(completionResume), handler: invoke("resume")},
+		{name: "sync", short: "Apply supported committed configuration changes", meta: syncReference(), flags: syncFlags, validArgs: workspaceCompletion(completionSync), handler: invoke("sync")},
 		{name: "list", short: "List this repository's EVE workspaces", meta: listReference(), flags: listFlags, handler: invoke("list")},
-		{name: "doctor", short: "Diagnose configuration and ownership", meta: doctorReference(), flags: doctorFlags, handler: invoke("doctor")},
+		{name: "doctor", short: "Diagnose configuration and ownership", meta: doctorReference(), flags: doctorFlags, validArgs: workspaceCompletion(completionSelector), handler: invoke("doctor")},
 		{name: "gc", short: "Report exact cleanup candidates", meta: gcReference(), flags: gcFlags, handler: invoke("gc")},
-		{name: "destroy", short: "Remove an owned workspace and resources", meta: destroyReference(), flags: destroyFlags, handler: invoke("destroy")},
+		{name: "destroy", short: "Remove an owned workspace and resources", meta: destroyReference(), flags: destroyFlags, validArgs: workspaceCompletion(completionDestroy), handler: invoke("destroy")},
 		{name: "init", short: "Generate or update eve.toml", meta: initReference(), flags: initFlags, handler: invoke("init")},
 		{name: "state", short: "Context evidence boundaries", meta: simpleReference("State", "Explain recorded versus observed EVE state.", "This reference performs no operation."), hidden: true, handler: topicHandler("State boundaries", "Recorded state is not live-process truth, credential presence is not validation, and expiry is not remote absence.")},
 		{name: "cleanup", short: "Manual deletion recovery", meta: simpleReference("Cleanup", "Explain exact cleanup after manual removal.", "This reference performs no cleanup."), hidden: true, handler: topicHandler("Cleanup boundaries", "Raw deletion leaves EVE records, remote resources, and claims. Help reports evidence; it never authorizes remote deletion.")},
@@ -207,6 +207,9 @@ func simpleReference(title, purpose, effect string) commandMeta {
 func runCobra(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
 	if path, ok := helpRequestPath(args); ok {
 		return writeHelpPath(stdout, path)
+	}
+	if len(args) >= 3 && args[0] == "__complete" && (args[len(args)-2] == "--from" || args[len(args)-2] == "--profile") {
+		return writeFlagCompletion(ctx, args, stdout, stderr)
 	}
 	var executed *output
 	root := newCommandTree(ctx, &executed)

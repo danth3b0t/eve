@@ -86,3 +86,25 @@ func TestCompletionGeneratorsUseCommandTreeOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestDynamicCompletionDegradesWithoutRepositoryOrWritableState(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	t.Setenv("XDG_CONFIG_HOME", base+"/config")
+	t.Setenv("XDG_STATE_HOME", base+"/state")
+	for _, args := range [][]string{
+		{"__complete", "destroy", ""},
+		{"__complete", "resume", ""},
+		{"__complete", "sync", ""},
+		{"__complete", "create", "--from", ""},
+		{"__complete", "auth", "convex", "status", "--profile", ""},
+	} {
+		code, stdout, stderr := runHelpProbe(t, args...)
+		if code != 0 || strings.Contains(stdout, "secret") {
+			t.Fatalf("completion %v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(base, "state")); err == nil {
+		t.Fatal("dynamic completion created state")
+	}
+}
