@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -71,6 +70,10 @@ func lookupContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 }
 
 func openCompletionMetadata(ctx context.Context) (*completionMetadata, error) {
+	return openCompletionMetadataFor(ctx, true)
+}
+
+func openCompletionMetadataFor(ctx context.Context, needStore bool) (*completionMetadata, error) {
 	metadata := &completionMetadata{status: lookupUnavailable}
 	client, err := git.New()
 	if err == nil {
@@ -83,6 +86,10 @@ func openCompletionMetadata(ctx context.Context) (*completionMetadata, error) {
 				metadata.currentPath = checkout.Identity.Path
 			}
 		}
+	}
+	if !needStore {
+		metadata.status = lookupAbsent
+		return metadata, nil
 	}
 	paths, pathErr := platform.DefaultPaths()
 	if pathErr != nil {
@@ -448,7 +455,7 @@ func committedManifest(ctx context.Context, metadata *completionMetadata) *confi
 func localRefCompletion(command *cobra.Command) {
 	_ = command.RegisterFlagCompletionFunc("from", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return noFileAdapter(func(ctx context.Context) ([]candidate, lookupStatus, error) {
-			metadata, err := openCompletionMetadata(ctx)
+			metadata, err := openCompletionMetadataFor(ctx, false)
 			if err != nil || metadata.checkout == nil {
 				return nil, lookupUnavailable, nil
 			}
@@ -518,7 +525,7 @@ func createTargetCompletion(cmd *cobra.Command, args []string, toComplete string
 func backendPathCompletion(command *cobra.Command) {
 	_ = command.RegisterFlagCompletionFunc("backend-path", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return noFileAdapter(func(ctx context.Context) ([]candidate, lookupStatus, error) {
-			metadata, err := openCompletionMetadata(ctx)
+			metadata, err := openCompletionMetadataFor(ctx, false)
 			if err != nil || metadata.checkout == nil {
 				return nil, lookupUnavailable, nil
 			}
@@ -549,48 +556,17 @@ func discoveredBackendPaths(ctx context.Context, metadata *completionMetadata) [
 	if metadata.checkout == nil || metadata.checkout.HeadOID == "" {
 		return nil
 	}
-	tree, err := metadata.client.Tree(ctx, metadata.checkout.Identity.Path, metadata.checkout.HeadOID)
+	paths, err := metadata.client.CompletionBackendPaths(ctx, metadata.checkout.Identity.Path, metadata.checkout.HeadOID)
 	if err != nil {
 		return nil
 	}
-	var names []string
-	for name := range tree {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var out []string
-	for _, name := range names {
-		if filepath.Base(name) != "convex.json" || strings.Contains(name, "node_modules/") {
-			continue
-		}
-		packagePath := filepath.Join(filepath.Dir(name), "package.json")
-		entry, ok := tree[packagePath]
-		if !ok {
-			continue
-		}
-		data, blobErr := metadata.client.Blob(ctx, metadata.checkout.Identity.Path, entry, 1<<20)
-		if blobErr != nil {
-			return out
-		}
-		var metadataJSON struct {
-			Dependencies    map[string]string `json:"dependencies"`
-			DevDependencies map[string]string `json:"devDependencies"`
-		}
-		if json.Unmarshal(data, &metadataJSON) != nil || (metadataJSON.Dependencies["convex"] == "" && metadataJSON.DevDependencies["convex"] == "") {
-			continue
-		}
-		out = append(out, filepath.Dir(name))
-		if len(out) >= 20 {
-			break
-		}
-	}
-	return out
+	return paths
 }
 
 func serviceIDCompletion(command *cobra.Command) {
 	_ = command.RegisterFlagCompletionFunc("site-url-service", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return noFileAdapter(func(ctx context.Context) ([]candidate, lookupStatus, error) {
-			metadata, err := openCompletionMetadata(ctx)
+			metadata, err := openCompletionMetadataFor(ctx, false)
 			if err != nil || metadata.checkout == nil {
 				return nil, lookupUnavailable, nil
 			}
