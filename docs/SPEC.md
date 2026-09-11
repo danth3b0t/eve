@@ -158,6 +158,7 @@ An executable cannot change its parent shell's working directory. `create` print
 |---|---|
 | `eve init [--dry-run]` | Inspect the invoking source checkout. Propose/write the manifest after review. No provider provisioning or executable config evaluation. |
 | `eve plan <branch> [--from <ref>]` | Validate a creation plan. No worktree, allocation, token, deployment, or application-file creation. Ports are prospective, not reserved. |
+| `eve keys [--json]` | Report committed interpolation variable names, sources and descriptions for the current manifest. Read-only; no state, provider or dotenv evaluation. |
 | `eve create <branch> [--from <ref>] [--yes]` | Create an owned workspace from an existing branch or create the branch from the selected base. Print summary and path. |
 | `eve path [<workspace>]` | Print canonical workspace path. Omitted workspace means current EVE worktree. |
 | `eve list [--all]` | List this repository's workspaces; `--all` lists this user's registered repositories. Local-state read only. |

@@ -29,27 +29,28 @@ import (
 const Version = "0.1.0"
 
 type output struct {
-	SchemaVersion   int                     `json:"schema_version"`
-	Command         string                  `json:"command"`
-	OK              bool                    `json:"ok"`
-	Version         string                  `json:"version,omitempty"`
-	Workspace       *workspace              `json:"workspace,omitempty"`
-	Services        map[string]service      `json:"services,omitempty"`
-	Resources       map[string]resource     `json:"resources,omitempty"`
-	Verification    *verification           `json:"verification,omitempty"`
-	Timings         map[string]int64        `json:"timings,omitempty"`
-	RestartRequired bool                    `json:"restart_required,omitempty"`
-	Existing        bool                    `json:"existing,omitempty"`
-	Plan            *lifecycle.PlanPreview  `json:"plan,omitempty"`
-	Doctor          *lifecycle.DoctorResult `json:"doctor,omitempty"`
-	Init            *initPreview            `json:"init,omitempty"`
-	Remote          []lifecycle.DoctorCheck `json:"remote,omitempty"`
-	Repositories    []repositoryGroup       `json:"repositories,omitempty"`
-	GC              []gcCandidate           `json:"gc_candidates,omitempty"`
-	Auth            map[string]string       `json:"auth,omitempty"`
-	Warnings        []string                `json:"warnings,omitempty"`
-	Error           *commandError           `json:"error,omitempty"`
-	Human           string                  `json:"-"`
+	SchemaVersion   int                             `json:"schema_version"`
+	Command         string                          `json:"command"`
+	OK              bool                            `json:"ok"`
+	Version         string                          `json:"version,omitempty"`
+	Workspace       *workspace                      `json:"workspace,omitempty"`
+	Services        map[string]service              `json:"services,omitempty"`
+	Resources       map[string]resource             `json:"resources,omitempty"`
+	Verification    *verification                   `json:"verification,omitempty"`
+	Timings         map[string]int64                `json:"timings,omitempty"`
+	RestartRequired bool                            `json:"restart_required,omitempty"`
+	Existing        bool                            `json:"existing,omitempty"`
+	Plan            *lifecycle.PlanPreview          `json:"plan,omitempty"`
+	KeysPreview     *lifecycle.InterpolationPreview `json:"keys_preview,omitempty"`
+	Doctor          *lifecycle.DoctorResult         `json:"doctor,omitempty"`
+	Init            *initPreview                    `json:"init,omitempty"`
+	Remote          []lifecycle.DoctorCheck         `json:"remote,omitempty"`
+	Repositories    []repositoryGroup               `json:"repositories,omitempty"`
+	GC              []gcCandidate                   `json:"gc_candidates,omitempty"`
+	Auth            map[string]string               `json:"auth,omitempty"`
+	Warnings        []string                        `json:"warnings,omitempty"`
+	Error           *commandError                   `json:"error,omitempty"`
+	Human           string                          `json:"-"`
 }
 type workspace struct {
 	ID         string `json:"id"`
@@ -139,7 +140,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				_, _ = fmt.Fprintf(stderr, "next: %s\n", response.Error.NextAction)
 			}
 			if response.Error.Code == "E_USAGE" {
-				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|path|status|doctor|sync|resume|destroy|gc|list|auth|init> [command options] [workspace]")
+				_, _ = fmt.Fprintln(stderr, "usage: eve <create|plan|keys|path|status|doctor|sync|resume|destroy|gc|list|auth|init> [command options] [workspace]")
 			}
 		}
 		return code
@@ -169,6 +170,8 @@ func run(ctx context.Context, args []string) (*output, error) {
 		return create(ctx, args[1:])
 	case "plan":
 		return plan(ctx, args[1:])
+	case "keys":
+		return keys(ctx, args[1:])
 	case "path":
 		return inspect(ctx, args[1:], true)
 	case "status":
@@ -463,6 +466,33 @@ func plan(ctx context.Context, args []string) (*output, error) {
 		human += fmt.Sprintf("native/copy destinations: %d\n", len(preview.Files.Files))
 	}
 	human += "no state, workspaces, ports or provider resources created\n"
+	response.Human = human
+	return response, nil
+}
+func keys(ctx context.Context, args []string) (*output, error) {
+	fs, _ := newFlags("keys")
+	positional, err := parseCommandFlags(fs, args)
+	if err != nil || len(positional) != 0 {
+		return nil, &domain.Error{Code: "E_USAGE", Message: "keys lists variables for the current committed eve.toml only"}
+	}
+	g, err := git.New()
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, &domain.Error{Code: "E_STATE_PATH", Message: "current directory is inaccessible"}
+	}
+	preview, err := lifecycle.InterpolationPreviewForCheckout(ctx, g, cwd)
+	if err != nil {
+		return nil, err
+	}
+	response := &output{SchemaVersion: 1, Command: "keys", OK: true, KeysPreview: &preview}
+	human := fmt.Sprintf("interpolation variables for committed eve.toml\nsource: %s\ntarget: %s\n", preview.Source, preview.HeadOID)
+	for _, variable := range preview.Keys {
+		human += fmt.Sprintf("%-42s %-15s %s\n", variable.Variable, "["+variable.Source+"]", variable.Description)
+	}
+	human += "manager/provider values are not shown; these names always resolve from creation output, not free text\n"
 	response.Human = human
 	return response, nil
 }

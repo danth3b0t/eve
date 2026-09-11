@@ -17,6 +17,7 @@ eve --version
 eve create --yes feature/payments       # branch worktree, reservations, native files
 eve init [--convex --project team:project [--profile name]] [--write --yes]
 eve init --update [--convex [--backend-path path]] [--write --yes]
+eve keys [--json]                         # committed interpolation inventory
 eve plan feature/payments
 eve path feature/payments
 eve status feature/payments [--refresh]
@@ -34,6 +35,7 @@ Repeating `create` on a prepared branch returns its existing workspace without m
 Interactive auth hides input by default; `--token-stdin` remains the automation path.
 
 `init --convex` discovers backend consumers from exact file/key evidence without executing dotenv values or project code. It writes an ordinary reviewable v1 manifest; updates reuse the committed manifest and preserve existing declarations. Convex development defaults remain the source for shared backend defaults and secrets—EVE does not clone them into the manifest. Create JSON includes phase timings for intent, reservations, Git, provider calls, file staging, publication and total preparation.
+`eve keys` is the offline reference for humans and LLM agents: it reports exactly the workspace/resource/service interpolation variables supported by the committed manifest, with source and description, while opening no state or cloud connection.
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
