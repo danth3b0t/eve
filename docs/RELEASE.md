@@ -30,6 +30,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 ## Current release evidence
 
 - Source tests: full native, race, CGo-disabled and documentation suites pass on Linux/amd64.
+- Cobra transparency: full help routes, read-only bounded context, Bash/Zsh completion, dynamic workspace/profile/Git candidate degradation, shared `effects`, targeted GC scopes/outcomes, and create/sync/resume/destroy dry-runs are covered on Linux/amd64.
 - Guided Convex onboarding: backend-only/resource-only manifests, local/custom URL key import without values, reviewed incremental manifest updates, same-invocation provider validation reuse, defaults-only zero remote-env requests, and redacted create phase timings are covered on Linux/amd64.
 - Native fixture: unchanged Bun/Turbo/Vite/Convex launch succeeds; real browser validation passes with the optional `agent-browser` harness only.
 - Remote: default region and `aws-eu-west-1` production lifecycle passes with exact cleanup.

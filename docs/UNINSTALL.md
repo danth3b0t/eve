@@ -29,7 +29,7 @@ Destroying a workspace intentionally removes:
 - exact owned remote deployment/resource state;
 - protected deployment key objects and local port claims.
 
-Its Git branch and canonical source checkout remain. Any application dependencies, source files, branches and unowned external artifacts remain the user's responsibility.
+Its canonical source checkout remains. Preexisting or divergent branches also remain; an unchanged EVE-created branch may be pruned only while it still equals the recorded creation target. Any application dependencies, source files and unowned external artifacts remain the user's responsibility.
 
 ## 3. Remove EVE state only after cleanup completes
 
@@ -47,10 +47,14 @@ User port configuration is at:
 
 No EVE state is encrypted for disk storage. Destroying it does not protect credentials already visible to this OS user or in worktree files created by EVE.
 
-## 4. Remove the executable
+
+## 4. Remove shell completion setup you approved
+
+EVE only prints completion scripts; it never edits `.bashrc` or `.zshrc`. If you manually saved/source a generated script or placed it in a shell function path, remove that startup line or file. Before removal, `eve completion uninstall` does not run. EVE's completion failures remain inert when the executable is absent.
+## 5. Remove the executable
 
 Delete the downloaded `eve` binary after resources are clean. Reinstalling later is safe, but the registry cannot be reconstructed from source alone.
 
-## No automatic cleanup
+## 6. No automatic cleanup
 
 EVE has no daemon or uninstall hook. Remote five-day expiration is only a provider fallback. Uninstalled binaries cannot inspect or delete resources.
