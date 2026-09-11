@@ -33,6 +33,8 @@ func TestHelpIsReadOnlyOutsideRepositoryAndState(t *testing.T) {
 		{"help", "completion"},
 		{"help", "state"},
 		{"help", "cleanup"},
+		{"help", "destroy", "--no-context"},
+		{"destroy", "--no-context", "--help"},
 	} {
 		code, stdout, stderr := runHelpProbe(t, tc...)
 		if code != 0 || stdout == "" || stderr != "" {

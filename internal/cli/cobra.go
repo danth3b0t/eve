@@ -241,10 +241,10 @@ func helpRequestPath(args []string) ([]string, bool) {
 	var path []string
 	for index, arg := range args {
 		if arg == "--" {
-			if arg == "--no-context" {
-				continue
-			}
 			break
+		}
+		if arg == "--no-context" {
+			continue
 		}
 		if arg == "--help" || arg == "-h" {
 			if len(path) > 1 {
@@ -259,11 +259,15 @@ func helpRequestPath(args []string) ([]string, bool) {
 			}
 			return path, true
 		}
-		if arg == "help" && len(path) == 0 {
+		if arg == "help" && index == 0 {
 			if len(args) == 1 {
 				return []string{}, true
 			}
-			path = append(path, args[index+1:]...)
+			for _, topic := range args[1:] {
+				if topic != "--no-context" {
+					path = append(path, topic)
+				}
+			}
 			return path, true
 		}
 		path = append(path, arg)
