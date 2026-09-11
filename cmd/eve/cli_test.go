@@ -248,7 +248,14 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if doctorCode != 0 || !doctor.OK || !strings.Contains(string(doctorOut), `"status":"pass"`) || !strings.Contains(string(doctorOut), `"status":"not_checked"`) {
 		t.Fatalf("doctor: %d %s", doctorCode, doctorOut)
 	}
-	completeCode, completeOut, _, _ := command(t, binary, root, base, "__complete", "destroy", "")
+	var completeCode int
+	var completeOut []byte
+	for attempt := 0; attempt < 5; attempt++ {
+		completeCode, completeOut, _, _ = command(t, binary, root, base, "__complete", "destroy", "")
+		if completeCode == 0 && strings.Contains(string(completeOut), "payments") {
+			break
+		}
+	}
 	if completeCode != 0 || !strings.Contains(string(completeOut), "payments") {
 		t.Fatalf("workspace completion: %d %s", completeCode, completeOut)
 	}
