@@ -44,7 +44,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 - GitHub Actions release run [34625441310](https://github.com/danth3b0t/eve/actions/runs/34625441310): `go mod verify`, the credential-free core suite, and `go vet -mod=readonly ./...` pass on `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, and `macos-15-intel`.
 - Actions used reviewed full-length commit pins: `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1` and `actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e`.
 - Release workflow rebuilt all four binaries from tag `v0.1.0-rc.5`, uploaded them to a draft prerelease, and produced `SHA256SUMS.txt`.
-- Downloaded Linux/amd64 asset checksum verification passed, and it reports `eve 0.1.0-rc.5`:
+- Downloaded Linux/amd64 asset checksum verification passed, and it reports `eve 0.1.0-rc.5`; `mise exec github:danth3b0t/eve@0.1.0-rc.5 -- eve version` also installed from GitHub and reported `eve 0.1.0-rc.5`:
   - `c2015d2f129030d6b8446e713ff801b8f24c85ec270711d6637caeb0a2789100` — `eve-linux-amd64`
   - `a91f45d888c44947457b7e031590e4ddc21f87d4b6ba7ea4a06509825d01bada` — `eve-linux-arm64`
   - `8d5fd9b71c5b4d46cf6ccb114445162ddfca13b9ee1117c1383288919969e945` — `eve-darwin-amd64`
