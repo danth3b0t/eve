@@ -108,6 +108,54 @@ func (c *Client) Inspect(ctx context.Context, dir string) (Checkout, error) {
 	return result, nil
 }
 
+// InspectForCompletion reads only the canonical repository/platform identity and
+// one HEAD revision in one bounded Git invocation. Lifecycle operations must continue
+// calling the full safety-oriented Inspect; candidates are evidence, not authority.
+func (c *Client) InspectForCompletion(ctx context.Context, dir string) (Checkout, error) {
+	var result Checkout
+	invoking, _, err := platform.DirectoryIdentity(dir)
+	if err != nil {
+		return result, problem("E_GIT_CHECKOUT", "checkout directory is missing or inaccessible", dir)
+	}
+	output, err := c.value(ctx, invoking, "rev-parse", "--is-bare-repository", "--is-inside-work-tree", "--show-toplevel", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir", "--verify", "--end-of-options", "HEAD^{commit}")
+	if err != nil {
+		return result, err
+	}
+	lines := strings.Split(output, "\n")
+	if len(lines) != 6 || lines[0] != "false" || lines[1] != "true" {
+		return result, problem("E_GIT_LAYOUT", "a normal non-bare checkout is required", invoking)
+	}
+	id := &result.Identity
+	for index, entry := range []struct {
+		path, identity *string
+	}{
+		{&id.Path, &id.PathIdentity},
+		{&id.AdminDir, &id.AdminIdentity},
+		{&id.CommonDir, &id.CommonIdentity},
+	} {
+		pathValue := lines[index+2]
+		if !filepath.IsAbs(pathValue) {
+			return Checkout{}, problem("E_GIT_FORMAT", "Git must report absolute administrative paths", invoking)
+		}
+		*entry.path, *entry.identity, err = platform.DirectoryIdentity(pathValue)
+		if err != nil {
+			return Checkout{}, err
+		}
+	}
+	rel, err := filepath.Rel(id.Path, invoking)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return Checkout{}, problem("E_GIT_IDENTITY", "Git redirected the checkout outside the invoking directory", invoking)
+	}
+	if id.AdminDir != id.CommonDir && filepath.Dir(id.AdminDir) != filepath.Join(id.CommonDir, "worktrees") {
+		return Checkout{}, problem("E_GIT_LAYOUT", "unexpected linked-worktree administrative location", id.AdminDir)
+	}
+	result.HeadOID = lines[5]
+	if !validOID(result.HeadOID) {
+		return Checkout{}, problem("E_GIT_FORMAT", "Git did not return a full commit ID", id.Path)
+	}
+	return result, nil
+}
+
 // Compatible rejects layouts requiring orchestration that EVE does not perform.
 // It reads index metadata only, never executable configuration or submodule code.
 func (c *Client) Compatible(ctx context.Context, checkout Checkout) error {

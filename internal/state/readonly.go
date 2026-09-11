@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"eve/internal/platform"
 	"eve/schemas"
@@ -16,6 +17,15 @@ import (
 // files, schema, WAL metadata or the machine key. It permits inspection only;
 // mutations and workspace capability locks are denied by Store checks below.
 func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	return OpenReadOnlyWithBusyTimeout(ctx, path, 5000)
+}
+
+// OpenReadOnlyWithBusyTimeout gives bounded metadata integrations an interruptible
+// read-only open. It still never initializes, migrates, or acquires write authority.
+func OpenReadOnlyWithBusyTimeout(ctx context.Context, path string, busyTimeoutMS int) (*Store, error) {
+	if busyTimeoutMS < 0 || busyTimeoutMS > 5000 {
+		busyTimeoutMS = 5000
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -56,7 +66,7 @@ func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
 	s.identities[dbPath] = info
 	u := url.URL{Scheme: "file", Path: dbPath}
 	q := url.Values{
-		"mode": {"ro"}, "_foreign_keys": {"on"}, "_busy_timeout": {"5000"}, "_defensive": {"true"}, "_dqs": {"false"}, "_pragma": {"trusted_schema(OFF)", "query_only(ON)"},
+		"mode": {"ro"}, "_foreign_keys": {"on"}, "_busy_timeout": {strconv.Itoa(busyTimeoutMS)}, "_defensive": {"true"}, "_dqs": {"false"}, "_pragma": {"trusted_schema(OFF)", "query_only(ON)"},
 	}
 	u.RawQuery = q.Encode()
 	s.db, err = sql.Open("sqlite", u.String())
