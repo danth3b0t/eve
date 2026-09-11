@@ -111,11 +111,19 @@ Interactive `create` now prints a committed-target review and requires typed `ye
 
 `eve --version` reports 0.1.0. `scripts/release.sh` produces stripped CGo-disabled Linux/macOS amd64/arm64 binaries and `SHA256SUMS.txt`; Linux/amd64 executes expected output, while other artifacts still need physical host validation. docs/UNINSTALL.md now warns against deleting binaries/state before exact cloud cleanup.
 
+## Prerelease publication
+
+MIT is committed as the source license. `scripts/release.sh` now stamps versions through `-X eve/internal/cli.Version=...`, the GitHub release workflow is installed, and its `actions/checkout`/`actions/setup-go` references are pinned by reviewed full commit SHA.
+
+GitHub Actions run [34625441310](https://github.com/danth3b0t/eve/actions/runs/34625441310) passed the credential-free core suite, `go mod verify`, and `go vet -mod=readonly ./...` on `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, and `macos-15-intel`. It rebuilt the tag `v0.1.0-rc.5`, uploaded all four plain binaries and `SHA256SUMS.txt` to a reviewable draft prerelease. The downloaded Linux/amd64 asset matched its checksum and responded with `eve 0.1.0-rc.5`. Recorded checksums are in [RELEASE.md](RELEASE.md).
+
+Several draft candidates exposed only test-harness portability issues before rc.5: BSD `script` differences, a Python PTY hang on macOS, and one cold 150 ms completion budget on the slower Intel runner. The production binaries were unchanged for those fixes; typed approval remains covered on Linux and explicit `--yes` plus completion degradation remain covered on every host.
+
 
 ## Completed-review stabilization
 
 The completed-project review findings now have regression coverage for option dispatch, typed create approval, incomplete create/sync recovery and destruction, provider-attempt journaling, multi-resource creation, journaled endpoint/remote sync, selector audits, incomplete HMAC bootstrap repair, publication subprocess bounds, short Git-scoped repository locks, actionable errors, named and hyphenated credential profiles, global registry access, exact stale admin/branch cleanup and explicit discovery. The focused Convex onboarding proposal is now implemented as well: backend-first/convex-only initialization, exact local and custom binding import, incremental update inheritance, native listener validation/revalidation, defaults-only environment short-circuit, validation reuse, create phase timings/progress, read-only interpolation inventory, Cobra help/completion, scoped GC outcome reporting, and create/sync/resume/destroy dry-runs. The final Linux/amd64 `go test ./...`, `go vet ./...`, module verification, and CGo-disabled/native/browser/race suite pass; the published Linux/amd64 binary has SHA-256 `6f0c5b1b3d3ad83515a872551ad22bb63a6068344dca7af5c9dbadfb2094fdb8`.
 
-Physical macOS amd64/arm64 and hardware Linux/arm64 runs still cannot be claimed from this x86_64 Linux host. Kairo has an external source checkout with unrelated in-flight edits and no authorized EVE credential profile; its ignored Convex state was not scraped, so its live externally-owned validation remains credential-gated, not silently replaced with a fixture claim.
+Kairo has an external source checkout with unrelated in-flight edits and no authorized EVE credential profile; its ignored Convex state was not scraped, so its live externally-owned validation remains credential-gated, not silently replaced with a fixture claim.
 
-See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), [M4.md](M4.md), and [RELEASE.md](RELEASE.md) for scope. Physical macOS/arm64 execution, signatures/notarization, broader topology sync and externally owned live-repository evidence remain open.
+See [M1.md](M1.md), [M2.md](M2.md), [M3.md](M3.md), [M4.md](M4.md), and [RELEASE.md](RELEASE.md) for scope. Stable promotion, signing/notarization, broader topology sync, cross-platform live application evidence and externally owned live-repository evidence remain open.

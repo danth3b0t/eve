@@ -6,9 +6,20 @@ Start with [docs/SPEC.md](docs/SPEC.md), the normative contract and implementati
 
 ## Status
 
-Linux evidence now covers unchanged Bun/Turbo/Vite/Convex start/stop lifecycles, inherited defaults, finite expiry/cleanup, a 31-minute elapsed TTL, default and `aws-eu-west-1` backends, and real browser-rendered EVE configuration. Physical macOS/Apple ARM runtime remains the separate release gate; QEMU Linux/arm64 smoke evidence exists but is emulated.
+Linux evidence covers unchanged Bun/Turbo/Vite/Convex start/stop lifecycles, inherited defaults, finite expiry/cleanup, a 31-minute elapsed TTL, default and `aws-eu-west-1` backends, and real browser-rendered EVE configuration. GitHub-hosted native runners also pass the credential-free core suite on Linux amd64/arm64 and macOS amd64/arm64. Live cross-platform application behavior and stable promotion remain gates.
 
 The guarded CLI supports guided/incremental `init --convex`, `plan`, create phase timings, `path`, `status --refresh`, `resume`, additive and extra-endpoint `sync`, `list`, `doctor --remote`, bounded `gc`, `destroy`, and Convex credential login/status/logout. Interactive creation prompts for typed `yes` on a TTY while JSON remains non-interactive.
+
+## Install
+
+The current reviewable prerelease installs through mise from plain GitHub assets:
+
+```sh
+mise use -g github:danth3b0t/eve@0.1.0-rc.5
+eve version
+```
+
+Manual artifacts and checksums are documented in [docs/RELEASE.md](docs/RELEASE.md).
 
 Interactive creation shows a preview and asks for typed `yes`; automation uses flags/JSON without prompting:
 
