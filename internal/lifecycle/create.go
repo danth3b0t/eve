@@ -28,10 +28,18 @@ type CreateResult struct {
 	Timings    CreateTimings
 }
 
+// CreateProgress receives safe only phase labels. It never receives provider
+// bodies, selectors, tokens or image data.
+type CreateProgress func(string)
+
 // CreateLocal performs the complete LOCAL-ONLY ordered boundary for an already
 // reviewed plan. It never installs dependencies, launches scripts or claims
 // runtime health. The returned state is configuration preparation only.
 func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, user config.UserConfig) (CreateResult, error) {
+	return CreateLocalProgress(ctx, s, g, p, user, nil)
+}
+
+func CreateLocalProgress(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, user config.UserConfig, progress CreateProgress) (CreateResult, error) {
 	totalStart := time.Now()
 	var timings CreateTimings
 	phaseStart := totalStart
@@ -40,7 +48,12 @@ func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, 
 		*target += now.Sub(phaseStart).Milliseconds()
 		phaseStart = now
 	}
-
+	phase := func(name string) {
+		if progress != nil {
+			progress(name)
+		}
+	}
+	phase("recording creation intent before the first write")
 	lock, err := s.LockWorkspace(p.WorkspaceID)
 	if err != nil {
 		return CreateResult{}, err
@@ -51,12 +64,14 @@ func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, 
 	}
 	mark(&timings.IntentMS)
 
+	phase("reserving immutable local allocations")
 	allocation, err := ports.Reserve(ctx, lock, nil)
 	if err != nil {
 		return CreateResult{}, err
 	}
 	mark(&timings.ReservationMS)
 
+	phase("creating the exact Git worktree")
 	if _, err := PrepareGit(ctx, s, g, lock); err != nil {
 		return CreateResult{}, err
 	}
@@ -69,15 +84,18 @@ func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, 
 	filesStart := time.Now()
 	if len(workspaceBeforeProvision.Manifest.Resources) != 0 {
 		providerStart := time.Now()
+		phase("creating and verifying provider development resources")
 		bindings, err := ProvisionResources(ctx, s, lock, workspaceBeforeProvision)
 		timings.ProviderMS += time.Since(providerStart).Milliseconds()
 		if err != nil {
 			return CreateResult{}, err
 		}
 		filesStart = time.Now()
+		phase("staging reviewed native file images")
 		if _, err := StageFilesWithBindings(ctx, s, g, lock, p.Files, &bindings); err != nil {
 			return CreateResult{}, err
 		}
+		phase("staging reviewed native file images")
 	} else if _, err := StageFiles(ctx, s, g, lock, p.Files); err != nil {
 		return CreateResult{}, err
 	}
@@ -85,6 +103,7 @@ func CreateLocal(ctx context.Context, s *state.Store, g *git.Client, p GitPlan, 
 	timings.FileStagingMS += time.Since(filesStart).Milliseconds()
 	phaseStart = filesStart
 	mark(&timings.PublicationMS)
+	phase("publishing declared configuration only")
 	prepared, err := PublishFiles(ctx, s, g, lock)
 	if err != nil {
 		return CreateResult{}, err

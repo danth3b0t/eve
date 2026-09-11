@@ -171,8 +171,8 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("typed PTY approval did not create: %v %s", err, ptyOut)
 	}
-	if !strings.Contains(string(ptyOut), "Create this workspace?") || !strings.Contains(string(ptyOut), "created \"payments\"") {
-		t.Fatalf("PTY approval output: %s", ptyOut)
+	if !strings.Contains(string(ptyOut), "Create this workspace?") || !strings.Contains(string(ptyOut), "created \"payments\"") || !strings.Contains(string(ptyOut), "recording creation intent") {
+		t.Fatalf("PTY approval/progress output: %s", ptyOut)
 	}
 	code, stdout, _, created := command(t, binary, root, base, "create", "--yes", "--json", "payments")
 	if code != 0 || !created.OK || !created.Existing || created.Workspace.State != "prepared" || created.Workspace.Generation != 1 {

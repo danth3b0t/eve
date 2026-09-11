@@ -438,7 +438,11 @@ func create(ctx context.Context, args []string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	created, err := lifecycle.CreateLocal(ctx, s, g, plan, user)
+	created, err := lifecycle.CreateLocalProgress(ctx, s, g, plan, user, func(phaseName string) {
+		if !*jsonOut {
+			_, _ = fmt.Fprintf(os.Stderr, "eve create: %s\n", phaseName)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
