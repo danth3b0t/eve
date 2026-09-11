@@ -392,20 +392,28 @@ func TestGCCLIReportsBeforeExactApply(t *testing.T) {
 		t.Fatalf("create: %d %s", code, stdout)
 	}
 	path := created.Workspace.Path
+	completeCode, completeOut, _, _ := command(t, binary, root, base, "__complete", "gc", "--workspace", "")
+	if completeCode != 0 || !strings.Contains(string(completeOut), "orphan") {
+		t.Fatalf("gc workspace completion: %d %s", completeCode, completeOut)
+	}
 	if err := os.RemoveAll(path); err != nil {
 		t.Fatal(err)
 	}
 	code, stdout, _, _ = command(t, binary, root, base, "gc", "--json")
-	if code != 0 || !strings.Contains(string(stdout), `"kind":"orphaned_worktree"`) || !strings.Contains(string(stdout), `"eligible":true`) || strings.Contains(string(stdout), `"applied":true`) {
+	if code != 0 || !strings.Contains(string(stdout), `"kind":"orphaned_worktree"`) || !strings.Contains(string(stdout), `"eligible":true`) || !strings.Contains(string(stdout), `"mode":"all_repositories"`) || strings.Contains(string(stdout), `"applied":true`) {
 		t.Fatalf("gc report: %d %s", code, stdout)
+	}
+	code, stdout, _, _ = command(t, binary, root, base, "gc", "--workspace", created.Workspace.ID, "--json")
+	if code != 0 || !strings.Contains(string(stdout), `"mode":"single_workspace"`) || !strings.Contains(string(stdout), created.Workspace.ID) || !strings.Contains(string(stdout), "observations") {
+		t.Fatalf("targeted gc report: %d %s", code, stdout)
 	}
 	neutral := filepath.Join(base, "neutral")
 	if err := os.Mkdir(neutral, 0700); err != nil {
 		t.Fatal(err)
 	}
-	code, stdout, _, _ = command(t, binary, neutral, base, "gc", "--apply", "--json")
+	code, stdout, _, _ = command(t, binary, neutral, base, "gc", "--apply", "--workspace", created.Workspace.ID, "--json")
 	if code != 0 || !strings.Contains(string(stdout), `"applied":true`) || !strings.Contains(string(stdout), `"state":"destroyed"`) {
-		t.Fatalf("gc apply: %d %s", code, stdout)
+		t.Fatalf("targeted gc apply: %d %s", code, stdout)
 	}
 	code, stdout, _, _ = command(t, binary, root, base, "gc", "--json")
 	if code != 0 || strings.Contains(string(stdout), path) || strings.Contains(string(stdout), `gc_candidates`) {

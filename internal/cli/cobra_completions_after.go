@@ -112,6 +112,10 @@ func writeFlagCompletion(ctx context.Context, args []string, stdout, stderr io.W
 		ctx, cancel := context.WithTimeout(ctx, completionBudget)
 		defer cancel()
 		candidates, err = profileCompletionCandidates(ctx, target)
+	case "--workspace":
+		ctx, cancel := context.WithTimeout(ctx, completionBudget)
+		defer cancel()
+		candidates, err = workspaceCompletionCandidates(ctx, completionCleanup, target)
 	default:
 		return 0, nil
 	}

@@ -45,6 +45,7 @@ func doctorFlags(command *cobra.Command) {
 func gcFlags(command *cobra.Command) {
 	jsonFlag(command)
 	command.Flags().Bool("apply", false, "perform the explicit cleanup operation shown")
+	command.Flags().String("workspace", "", "exact workspace UUID whose cleanup is selected")
 }
 
 func destroyFlags(command *cobra.Command) {

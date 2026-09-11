@@ -217,7 +217,7 @@ func runCobra(ctx context.Context, args []string, stdout, stderr io.Writer) (int
 		options.Interactive = terminalHuman(stdout)
 		return writeHelpPath(stdout, path, options)
 	}
-	if len(args) >= 3 && args[0] == "__complete" && (args[len(args)-2] == "--from" || args[len(args)-2] == "--profile") {
+	if len(args) >= 3 && args[0] == "__complete" && (args[len(args)-2] == "--from" || args[len(args)-2] == "--profile" || args[len(args)-2] == "--workspace") {
 		return writeFlagCompletion(ctx, args, stdout, stderr)
 	}
 	var executed *output

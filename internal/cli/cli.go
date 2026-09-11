@@ -46,6 +46,7 @@ type output struct {
 	Init            *initPreview                    `json:"init,omitempty"`
 	Remote          []lifecycle.DoctorCheck         `json:"remote,omitempty"`
 	Repositories    []repositoryGroup               `json:"repositories,omitempty"`
+	GCScope         *gcScope                        `json:"gc_scope,omitempty"`
 	GC              []gcCandidate                   `json:"gc_candidates,omitempty"`
 	Auth            map[string]string               `json:"auth,omitempty"`
 	Warnings        []string                        `json:"warnings,omitempty"`
@@ -82,12 +83,23 @@ type listedWorkspace struct {
 	Services  map[string]service  `json:"services,omitempty"`
 	Resources map[string]resource `json:"resources,omitempty"`
 }
+type gcScope struct {
+	Mode      string     `json:"mode"`
+	Workspace *workspace `json:"workspace,omitempty"`
+}
+type gcObservation struct {
+	Kind     string `json:"kind"`
+	Evidence string `json:"evidence"`
+}
 type gcCandidate struct {
-	Kind      string    `json:"kind"`
-	Eligible  bool      `json:"eligible"`
-	Reason    string    `json:"reason"`
-	Workspace workspace `json:"workspace"`
-	Applied   bool      `json:"applied,omitempty"`
+	Kind         string          `json:"kind"`
+	Eligible     bool            `json:"eligible"`
+	Reason       string          `json:"reason"`
+	Workspace    workspace       `json:"workspace"`
+	Observations []gcObservation `json:"observations"`
+	Applied      bool            `json:"applied,omitempty"`
+	ErrorCode    string          `json:"error_code,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
 }
 type initPreview struct {
 	Manifest         string        `json:"manifest"`
@@ -833,78 +845,128 @@ func list(ctx context.Context, args []string) (*output, error) {
 	response.Human = human.String()
 	return response, nil
 }
+func cliWorkspace(w state.Workspace) workspace {
+	return workspace{ID: w.ID, Branch: w.Branch, Path: w.Path, State: w.State, Phase: w.Phase, Generation: w.Generation}
+}
+
 func gc(ctx context.Context, args []string) (*output, error) {
 	fs, _ := newFlags("gc")
 	apply := fs.Bool("apply", false, "retry the exact eligible cleanup operations shown")
+	workspaceID := fs.String("workspace", "", "restrict report/apply to this exact workspace UUID")
 	positional, parseErr := parseCommandFlags(fs, args)
 	if parseErr != nil {
 		return nil, &domain.Error{Code: "E_USAGE", Message: "invalid gc options"}
 	}
 	if len(positional) != 0 {
-		return nil, &domain.Error{Code: "E_USAGE", Message: "gc does not accept a workspace selector"}
+		return nil, &domain.Error{Code: "E_USAGE", Message: "gc accepts --workspace UUID rather than a positional selector"}
 	}
 	g, s, err := globalStore(ctx, *apply)
 	if err != nil {
 		return nil, err
 	}
 	defer s.Close()
-	repositories, err := s.Repositories(ctx)
-	if err != nil {
-		return nil, err
-	}
-	response := &output{SchemaVersion: 1, Command: "gc", OK: true}
-	var human strings.Builder
 	now := time.Now().UnixMilli()
-	for _, repo := range repositories {
-		workspaces, err := s.ListWorkspaces(ctx, repo.ID, false)
+	response := &output{SchemaVersion: 1, Command: "gc", OK: true}
+	var selectedWorkspaces []state.Workspace
+	if *workspaceID != "" {
+		selected, err := s.Workspace(ctx, *workspaceID)
 		if err != nil {
 			return nil, err
 		}
-		for _, w := range workspaces {
-			candidate, include, err := gcCandidateFor(ctx, s, w, now)
+		selectedWorkspaces = []state.Workspace{selected}
+		target := cliWorkspace(selected)
+		response.GCScope = &gcScope{Mode: "single_workspace", Workspace: &target}
+	} else {
+		response.GCScope = &gcScope{Mode: "all_repositories"}
+		repositories, err := s.Repositories(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, repo := range repositories {
+			workspaces, err := s.ListWorkspaces(ctx, repo.ID, false)
 			if err != nil {
 				return nil, err
 			}
-			if !include {
-				continue
-			}
-			if *apply && candidate.Eligible {
-				result, err := lifecycle.ApplyGC(ctx, s, g, w.ID, lifecycle.GCOptions{})
-				if err != nil {
-					return nil, err
-				}
-				candidate.Applied = true
-				candidate.Workspace = workspace{ID: result.Workspace.ID, Branch: result.Workspace.Branch, Path: result.Workspace.Path, State: result.Workspace.State, Phase: result.Workspace.Phase, Generation: result.Workspace.Generation}
-			}
-			response.GC = append(response.GC, candidate)
-			fmt.Fprintf(&human, "%s %s eligible=%t path=%s\n", candidate.Kind, candidate.Reason, candidate.Eligible, quote(candidate.Workspace.Path))
+			selectedWorkspaces = append(selectedWorkspaces, workspaces...)
 		}
 	}
-	if len(response.GC) == 0 {
-		human.WriteString("no recorded cleanup candidates\n")
+	var candidates []gcCandidate
+	var failures int
+	var applied int
+	for _, workspaceInfo := range selectedWorkspaces {
+		candidate, include, err := gcCandidateFor(ctx, s, workspaceInfo, now)
+		if err != nil {
+			return nil, err
+		}
+		if !include {
+			continue
+		}
+		if *apply && candidate.Eligible {
+			result, applyErr := lifecycle.ApplyGC(ctx, s, g, workspaceInfo.ID, lifecycle.GCOptions{})
+			if applyErr != nil {
+				candidate.ErrorCode, candidate.ErrorMessage = errorCodeAndMessage(applyErr)
+				failures++
+			} else {
+				candidate.Applied = true
+				applied++
+				candidate.Workspace = cliWorkspace(result.Workspace)
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	response.GC = candidates
+	var human strings.Builder
+	if response.GCScope.Workspace != nil {
+		human.WriteString("Scope: recorded workspace " + response.GCScope.Workspace.ID + "\n")
+	} else {
+		human.WriteString("Scope: all registered repositories\n")
+	}
+	if len(candidates) == 0 {
+		human.WriteString("no recorded cleanup candidates within the selected scope\n")
+	}
+	for _, candidate := range candidates {
+		fmt.Fprintf(&human, "%s %s eligible=%t path=%s\n", candidate.Kind, candidate.Reason, candidate.Eligible, quote(candidate.Workspace.Path))
+		if len(candidate.Observations) != 0 {
+			for _, observation := range candidate.Observations {
+				human.WriteString("  " + observation.Kind + ": " + observation.Evidence + "\n")
+			}
+		}
+		if candidate.ErrorMessage != "" {
+			human.WriteString("  result: " + candidate.ErrorCode + " " + candidate.ErrorMessage + "\n")
+		}
+		if candidate.Applied {
+			human.WriteString("  result: applied exact cleanup\n")
+		}
+	}
+	if failures != 0 {
+		response.OK = false
+		response.Error = &commandError{Code: "E_GC_PARTIAL", Message: fmt.Sprintf("gc applied %d cleanup(s) but %d failed; candidate outcomes are retained", applied, failures), Details: map[string]any{"applied": applied, "failed": failures}, NextAction: "review each failed candidate, then rerun the same gc command after repair"}
+		human.WriteString(response.Error.Message + "\n")
 	}
 	response.Human = human.String()
 	return response, nil
 }
+
+func errorCodeAndMessage(err error) (string, string) {
+	result := errorResult("gc", err)
+	return result.Error.Code, result.Error.Message
+}
+
 func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now int64) (gcCandidate, bool, error) {
-	candidate := gcCandidate{Workspace: workspace{ID: w.ID, Branch: w.Branch, Path: w.Path, State: w.State, Phase: w.Phase, Generation: w.Generation}}
+	candidate := gcCandidate{Workspace: cliWorkspace(w), Observations: []gcObservation{}}
 	resources, err := s.Resources(ctx, w.ID)
 	if err != nil {
 		return candidate, false, err
 	}
+	var expired, pendingRemote bool
 	for _, resource := range resources {
 		if resource.ExpiresAtMS > 0 && resource.ExpiresAtMS <= now && resource.State != "deleted" {
-			candidate.Kind = "expired_resource"
-			candidate.Reason = "deployment expired; local worktree is preserved and no automatic deletion follows"
-			return candidate, true, nil
+			expired = true
+			candidate.Observations = append(candidate.Observations, gcObservation{Kind: "expiry", Evidence: fmt.Sprintf("recorded expiry passed at %s", time.UnixMilli(resource.ExpiresAtMS).UTC().Format(time.RFC3339))})
 		}
 		if resource.State == "unknown" || resource.State == "cleanup_pending" || resource.State == "deleting" {
-			candidate.Kind = "remote_cleanup_pending"
-			candidate.Reason = "recorded remote operation must be reconciled, not replaced"
-			if w.State == "destroying" || w.State == "cleanup_pending" {
-				candidate.Eligible = true
-			}
-			return candidate, true, nil
+			pendingRemote = true
+			candidate.Observations = append(candidate.Observations, gcObservation{Kind: "remote_cleanup", Evidence: "recorded remote operation requires exact reconciliation"})
 		}
 	}
 	switch w.State {
@@ -912,20 +974,34 @@ func gcCandidateFor(ctx context.Context, s *state.Store, w state.Workspace, now 
 		candidate.Kind = "cleanup_pending"
 		candidate.Reason = "exact local/remote cleanup can be retried"
 		candidate.Eligible = true
-		return candidate, true, nil
+		candidate.Observations = append(candidate.Observations, gcObservation{Kind: "lifecycle", Evidence: "destroy operation is unfinished"})
 	case "creating", "failed":
 		candidate.Kind = "unfinished_create"
 		candidate.Reason = "resume the operation or review its durable intent"
-		return candidate, true, nil
+		candidate.Observations = append(candidate.Observations, gcObservation{Kind: "lifecycle", Evidence: "unfinished creation intent exists"})
 	case "prepared":
+		candidate.Observations = append(candidate.Observations, gcObservation{Kind: "recorded_state", Evidence: "prepared generation " + strconv.Itoa(w.Generation)})
 		if _, err := os.Lstat(w.Path); err == nil {
+			candidate.Observations = append(candidate.Observations, gcObservation{Kind: "local_path", Evidence: "present"})
+			if expired {
+				candidate.Kind = "expired_resource"
+				candidate.Reason = "recorded expiry passed; existing worktree is preserved and remote existence is not checked by bare gc"
+				return candidate, true, nil
+			}
+			if pendingRemote {
+				candidate.Kind = "remote_cleanup_pending"
+				candidate.Reason = "recorded remote cleanup must be reconciled, not replaced"
+				return candidate, true, nil
+			}
 			return candidate, false, nil
 		} else if errors.Is(err, os.ErrNotExist) {
+			candidate.Observations = append(candidate.Observations, gcObservation{Kind: "local_path", Evidence: "missing"})
 			candidate.Kind = "orphaned_worktree"
 			candidate.Reason = "recorded workspace path is absent; exact remote/local cleanup can be completed"
 			candidate.Eligible = true
 			return candidate, true, nil
 		}
+		candidate.Observations = append(candidate.Observations, gcObservation{Kind: "local_path", Evidence: "inaccessible; absence is not proven"})
 		candidate.Kind = "unverifiable_workspace"
 		candidate.Reason = "path is inaccessible; absence is not proven"
 		return candidate, true, nil
@@ -1240,7 +1316,7 @@ func exitCode(err error) int {
 		return 7
 	case "E_CLEANUP_PENDING", "E_GIT_RECONCILE", "E_PUBLICATION_RECONCILE":
 		return 6
-	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_GIT_REFERENCE_CHANGED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY":
+	case "E_POSSIBLY_RUNNING", "E_WORKTREE_DIRTY", "E_APPROVAL_REQUIRED", "E_WORKSPACE_BUSY", "E_WORKSPACE_NOT_FOUND", "E_TRACKED_CREDENTIAL_FILE", "E_MANAGED_VALUE_CHANGED", "E_CREATION_ONLY_CHANGE", "E_SYNC_STATE", "E_PORT_OCCUPIED", "E_GIT_OWNERSHIP", "E_GIT_LOCKED", "E_GIT_REFERENCE_CHANGED", "E_SOURCE_UNREGISTERED", "E_CREATE_EXISTS", "E_RESUME_REQUIRED", "E_INIT_EXISTS", "E_INIT_DISCOVERY", "E_GC_PARTIAL":
 		return 3
 	case "E_USAGE", "E_MANIFEST_INVALID", "E_ENV_SYNTAX", "E_ENV_SERIALIZATION", "E_ENV_KEY", "E_ENV_DUPLICATE", "E_ENV_VALUE", "E_ENV_SIZE", "E_PATH_ESCAPE", "E_CONFIG_INVALID":
 		return 2
