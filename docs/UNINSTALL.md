@@ -49,10 +49,25 @@ No EVE state is encrypted for disk storage. Destroying it does not protect crede
 
 
 ## 4. Remove shell completion setup you approved
+EVE prints scripts and setup instructions only; it never edits `.bashrc`, `.bash_profile`, `.zshrc`, completion directories, or mise configuration. Remove the specific choice you made:
 
-EVE only prints completion scripts; it never edits `.bashrc` or `.zshrc`. If you manually saved/source a generated script or placed it in a shell function path, remove that startup line or file. Before removal, `eve completion uninstall` does not run. EVE's completion failures remain inert when the executable is absent.
+```bash
+# Current Bash session
+complete -r eve
+
+# Saved user Bash completion file, if you deliberately wrote it
+rm -- "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/eve"
+
+# Current initialized Zsh session
+compdef -d eve
+
+# Saved user Zsh function
+rm -- "$HOME/.zsh/completions/_eve"
+```
+
+Remove only the startup/fpath/source line you added, not an entire shell startup file. `eve completion setup --shell <shell>` explains the exact matching Bash or Zsh setup before removal. There is intentionally no `eve completion uninstall`; an external CLI cannot claim to edit its parent shell.
+
 ## 5. Remove the executable
-
 Delete the downloaded `eve` binary after resources are clean. Reinstalling later is safe, but the registry cannot be reconstructed from source alone.
 
 ## 6. No automatic cleanup

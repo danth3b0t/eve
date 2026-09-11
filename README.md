@@ -40,8 +40,11 @@ eve doctor [feature/payments] [--remote]
 eve gc [--apply] [--workspace <id>]
 eve auth convex login --project team:slug [--token-stdin]
 eve auth convex logout [--profile name]
-eve help [command] [--no-context]           # static/effect reference + bounded local context
-eve completion bash|zsh                   # print shell completion; no startup file changes
+eve help [command] [--no-context]                # static/effect reference + bounded local context
+eve auth convex status [--profile name]
+eve completion                                  # overview; exits 0
+eve completion setup [--shell auto|bash|zsh]     # setup instructions
+eve completion bash|zsh                         # print safe shell transport; no edits
 ```
 
 Repeating `create` on a prepared branch returns its existing workspace without mutation; incomplete operations require `resume`.
@@ -50,12 +53,14 @@ Interactive auth hides input by default; `--token-stdin` remains the automation 
 `init --convex` discovers backend consumers from exact file/key evidence without executing dotenv values or project code. It writes an ordinary reviewable v1 manifest; updates reuse the committed manifest and preserve existing declarations. Convex development defaults remain the source for shared backend defaults and secrets—EVE does not clone them into the manifest. Create JSON includes phase timings for intent, reservations, Git, provider calls, file staging, publication and total preparation.
 `eve keys` is the offline reference for humans and LLM agents: it reports exactly the workspace/resource/service interpolation variables supported by the committed manifest, with source and description, while opening no state or cloud connection.
 Use `--discard-changes` to authorize discarding reviewed user work, and `--assume-stopped` only after separately assessing an occupied claimed port. A listening process is never killed or identified by port.
-Help and completion are read-only. Static help stays available without Git, credentials or a registry; interactive context labels recorded infrastructure separately and `--no-context` makes repeatable output. `completion bash` and `completion zsh` only print scripts and never alter `.bashrc` or `.zshrc`. Candidate completion is bounded, noninteractive, and uses public IDs/names only.
+Help and completion share the registered Cobra command/flag grammar. Static help stays available without Git, credentials or a registry; `--no-context` makes output repeatable. Bare information groups such as `eve`, `eve auth`, `eve auth convex`, and `eve completion` return useful guidance with exit 0 rather than invoking a child action.
+
+Use `eve completion setup` before installing completion. It prints shell-specific instructions, uses `$SHELL` only as a labeled hint, and never edits startup files. Bash requires the user-provided `bash-completion` helper (`_get_comp_words_by_ref`); Zsh requires an initialized `compinit` environment. Explicit `eve completion bash` / `eve completion zsh` print reviewed scripts using an argument-preserving transport adapter (no request `eval`), verified in real Bash and Zsh PTY tests.
 `keys`, action `effects`, and lifecycle `--dry-run` phases are from the same closed vocabulary: create/change/sync/resume previews never claim actions before mutation and never include secret values. Existing-source branches are preserved; an EVE-created branch is pruned only if it still points exactly at its recorded creation commit, while divergent branches remain.
 The repository requires a committed `eve.toml` whose existing applications already consume the declared destinations/keys.
 
 See [docs/M0.md](docs/M0.md) for evidence and the live runbook, [docs/M1.md](docs/M1.md) for local-core behavior, [docs/M2.md](docs/M2.md) for Convex provider behavior, [docs/M3.md](docs/M3.md) for resume/recovery boundaries, and [docs/M4.md](docs/M4.md) for inspection/diagnostic boundaries.
-Release artifacts and uninstall boundaries are documented in [docs/RELEASE.md](docs/RELEASE.md) and [docs/UNINSTALL.md](docs/UNINSTALL.md).
+Release artifacts and uninstall boundaries are documented in [docs/RELEASE.md](docs/RELEASE.md) and [docs/UNINSTALL.md](docs/UNINSTALL.md). Generated command grammar snapshots are in [docs/HELP_SNAPSHOTS.md](docs/HELP_SNAPSHOTS.md).
 
 ## Checks
 
