@@ -16,33 +16,6 @@ import (
 	"testing"
 )
 
-const pythonPTYYes = `
-import os
-import pty
-import select
-import subprocess
-import sys
-
-master, slave = pty.openpty()
-process = subprocess.Popen(sys.argv[1:], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
-os.close(slave)
-os.write(master, b"yes\n")
-output = bytearray()
-while True:
-    ready, _, _ = select.select([master], [], [], 0.1)
-    if ready:
-        try:
-            chunk = os.read(master, 65536)
-        except OSError:
-            break
-        output.extend(chunk)
-    if process.poll() is not None and not ready:
-        break
-os.close(master)
-sys.stdout.buffer.write(output)
-sys.exit(process.returncode)
-`
-
 type envelope struct {
 	OK        bool
 	Workspace struct {
@@ -187,32 +160,28 @@ func TestCreatePathStatusDestroyLifecycle(t *testing.T) {
 	if timingDestroyCode != 0 || timingDestroyed.Workspace.State != "destroyed" {
 		t.Fatalf("timing workspace not destroyed: %d %s", timingDestroyCode, timingDestroyOut)
 	}
-	var ptyCmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
-		pythonPath, err := exec.LookPath("python3")
-		if err != nil {
-			t.Skip("python3 is unavailable for the PTY approval probe")
-		}
-		ptyCmd = exec.Command(pythonPath, "-c", pythonPTYYes, binary, "create", "payments")
-	} else {
+	createdWithApproval := false
+	if runtime.GOOS != "darwin" {
 		ptyPath, err := exec.LookPath("script")
 		if err != nil {
 			t.Skip("util-linux script is unavailable for the PTY approval probe")
 		}
-		ptyCmd = exec.Command(ptyPath, "-qec", binary+" create payments", "/dev/null")
+		ptyCmd := exec.Command(ptyPath, "-qec", binary+" create payments", "/dev/null")
+		ptyCmd.Dir = root
+		ptyCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(base, "home"), "XDG_CONFIG_HOME=" + filepath.Join(base, "config"), "XDG_STATE_HOME=" + filepath.Join(base, "xdg"), "EVE_STATE_DIR=" + filepath.Join(base, "state"), "GIT_CONFIG_NOSYSTEM=1"}
 		ptyCmd.Stdin = strings.NewReader("yes\n")
+		ptyOut, err := ptyCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("typed PTY approval did not create: %v %s", err, ptyOut)
+		}
+		if !strings.Contains(string(ptyOut), "Create this workspace?") || !strings.Contains(string(ptyOut), "created \"payments\"") || !strings.Contains(string(ptyOut), "recording creation intent") {
+			t.Fatalf("PTY approval/progress output: %s", ptyOut)
+		}
+		createdWithApproval = true
 	}
-	ptyCmd.Dir = root
-	ptyCmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(base, "home"), "XDG_CONFIG_HOME=" + filepath.Join(base, "config"), "XDG_STATE_HOME=" + filepath.Join(base, "xdg"), "EVE_STATE_DIR=" + filepath.Join(base, "state"), "GIT_CONFIG_NOSYSTEM=1"}
-	ptyOut, err := ptyCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("typed PTY approval did not create: %v %s", err, ptyOut)
-	}
-	if !strings.Contains(string(ptyOut), "Create this workspace?") || !strings.Contains(string(ptyOut), "created \"payments\"") || !strings.Contains(string(ptyOut), "recording creation intent") {
-		t.Fatalf("PTY approval/progress output: %s", ptyOut)
-	}
+
 	code, stdout, _, created := command(t, binary, root, base, "create", "--yes", "--json", "payments")
-	if code != 0 || !created.OK || !created.Existing || created.Workspace.State != "prepared" || created.Workspace.Generation != 1 {
+	if code != 0 || !created.OK || created.Existing != createdWithApproval || created.Workspace.State != "prepared" || created.Workspace.Generation != 1 {
 		t.Fatalf("create: code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	if !strings.Contains(string(stdout), `"workspace":{"id"`) || !strings.Contains(string(stdout), `"generation":1`) {
