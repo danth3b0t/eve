@@ -525,42 +525,28 @@ func createTargetCompletion(cmd *cobra.Command, args []string, toComplete string
 func backendPathCompletion(command *cobra.Command) {
 	_ = command.RegisterFlagCompletionFunc("backend-path", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return noFileAdapter(func(ctx context.Context) ([]candidate, lookupStatus, error) {
-			metadata, err := openCompletionMetadataFor(ctx, false)
-			if err != nil || metadata.checkout == nil {
+			client, err := git.New()
+			if err != nil {
 				return nil, lookupUnavailable, nil
 			}
-			defer metadata.close()
-			var out []candidate
-			if manifest := committedManifest(ctx, metadata); manifest != nil {
-				for _, resource := range manifest.Resources {
-					if resource.Provider == "convex" && resource.Path != "" && hasCompletionPrefix(resource.Path, toComplete) {
-						out = append(out, candidate{Insert: resource.Path, Description: "declared backend resource path", Kind: "path"})
-					}
-				}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil, lookupUnavailable, nil
 			}
-			if len(out) == 0 {
-				paths := discoveredBackendPaths(ctx, metadata)
-				for _, path := range paths {
-					if hasCompletionPrefix(path, toComplete) {
-						out = append(out, candidate{Insert: path, Description: "committed Convex package evidence", Kind: "path"})
-					}
+			paths, err := client.CompletionBackendPaths(ctx, cwd, "HEAD")
+			if err != nil {
+				return nil, lookupUnavailable, nil
+			}
+			var out []candidate
+			for _, path := range paths {
+				if hasCompletionPrefix(path, toComplete) {
+					out = append(out, candidate{Insert: path, Description: "committed convex.json package evidence", Kind: "path"})
 				}
 			}
 			sortCandidates(out)
 			return out, lookupAvailable, ctx.Err()
 		}, "Use an exact committed Convex package path")(cmd, args, toComplete)
 	})
-}
-
-func discoveredBackendPaths(ctx context.Context, metadata *completionMetadata) []string {
-	if metadata.checkout == nil || metadata.checkout.HeadOID == "" {
-		return nil
-	}
-	paths, err := metadata.client.CompletionBackendPaths(ctx, metadata.checkout.Identity.Path, metadata.checkout.HeadOID)
-	if err != nil {
-		return nil
-	}
-	return paths
 }
 
 func serviceIDCompletion(command *cobra.Command) {
