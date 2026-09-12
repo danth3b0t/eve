@@ -15,9 +15,15 @@ The guarded CLI supports guided/incremental `init --convex`, `plan`, create phas
 The current reviewable prerelease installs through mise from plain GitHub assets:
 
 ```sh
+# exact immutable release
 mise use -g github:danth3b0t/eve@0.1.0-rc.11
+
+# floating alias Release, if you explicitly want it
+mise use -g github:danth3b0t/eve@latest
 eve version
 ```
+
+Mise's minimum-release-age filter may briefly hide a just-published alias. Use an exact version or seed it manually with `MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:danth3b0t/eve@latest`.
 
 Manual artifacts and checksums are documented in [docs/RELEASE.md](docs/RELEASE.md).
 

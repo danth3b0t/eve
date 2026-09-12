@@ -11,6 +11,14 @@ mise use -g github:danth3b0t/eve@0.1.0-rc.11
 eve version
 ```
 
+If you deliberately want the floating alias instead of an immutable RC tag:
+
+```sh
+mise use -g github:danth3b0t/eve@latest
+```
+
+Mise's minimum-release-age filter can briefly hide a just-published alias release. Use the exact version when reproducibility matters, or seed the alias explicitly with `MISE_MINIMUM_RELEASE_AGE=0 mise use -g github:danth3b0t/eve@latest`.
+
 The raw artifacts are also available as `eve-linux-amd64`, `eve-linux-arm64`, `eve-darwin-amd64`, `eve-darwin-arm64`, and `SHA256SUMS.txt`. Checksums protect against transfer corruption only; they are not signatures. If downloading manually rather than through mise, restore the executable bit and verify the relevant SHA-256 line.
 
 ## Build
@@ -51,7 +59,7 @@ Git is the only required external executable for core EVE operations. Applicatio
 - Source tests: full native, race, CGo-disabled and documentation suites pass on Linux/amd64.
 - GitHub Actions release run [34660867789](https://github.com/danth3b0t/eve/actions/runs/34660867789): `go mod verify`, the credential-free core suite, and `go vet -mod=readonly ./...` pass on `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, and `macos-15-intel`.
 - Actions used reviewed full-length commit pins: `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1` and `actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e`.
-- Release workflow rebuilt all four binaries from tag `v0.1.0-rc.11`, uploaded them to a draft prerelease, and produced `SHA256SUMS.txt`; after draft review the prerelease was published without asset mutation. Alias workflow [34661390465](https://github.com/danth3b0t/eve/actions/runs/34661390465) then moved the documented floating `latest` tag to the immutable tag object.
+- Release workflow rebuilt all four binaries from tag `v0.1.0-rc.11`, uploaded them to a draft prerelease, and produced `SHA256SUMS.txt`; after draft review the prerelease was published without asset mutation. Alias workflow [34680797300](https://github.com/danth3b0t/eve/actions/runs/34680797300) then verified those assets, moved the documented floating `latest` tag, and published the mutable full-release `latest` alias with identical assets.
 - Downloaded Linux/amd64 asset checksum verification passed, and it reports `eve 0.1.0-rc.11`; `mise exec github:danth3b0t/eve@0.1.0-rc.11 -- eve version` also installed from GitHub and reported `eve 0.1.0-rc.11`:
   - `39c295b064b7a1f23230a7d7667eebf408faa6427becbf07aa45beba74925da2` — `eve-linux-amd64`
   - `ffcf802213fd431af142e9796c3dcfaea3a69697252fefde051eaa3e9e529408` — `eve-linux-arm64`
