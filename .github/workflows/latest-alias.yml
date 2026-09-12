@@ -19,19 +19,42 @@ concurrency:
 
 jobs:
   alias-latest:
-    name: Move the `latest` tag to the published version
+    name: Republish the full-release and Git `latest` aliases
     runs-on: ubuntu-24.04
     env:
       TARGET_TAG: ${{ github.event.release.tag_name || inputs.version }}
     steps:
       - name: Reject missing target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           if [ -z "${TARGET_TAG}" ]; then
             echo 'release tag_name is absent and no recovery version was supplied' >&2
             exit 1
           fi
-      - name: Fetch the immutable version tag
+          gh release view "${TARGET_TAG}" --repo "${{ github.repository }}" --json tagName,isDraft,isPrerelease
+      - name: Download published immutable assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          mkdir -p latest-assets
+          gh release download "${TARGET_TAG}" \
+            --repo "${{ github.repository }}" \
+            --dir latest-assets \
+            --clobber
+          test -f latest-assets/SHA256SUMS.txt
+          (cd latest-assets && sha256sum -c --ignore-missing SHA256SUMS.txt)
+      - name: Retire the previous mutable latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release delete latest --repo "${{ github.repository }}" --yes
+          fi
+      - name: Fetch and move the floating Git tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -41,15 +64,24 @@ jobs:
           git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
           git -c credential.helper='!f() { echo username=x-access-token; echo password="${GH_TOKEN}"; }; f' \
             -c protocol.version=2 fetch --no-tags --depth=1 origin "refs/tags/${TARGET_TAG}:refs/tags/source"
-      - name: Move the floating latest tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          cd latest-alias
           git config user.name "eve-release-bot"
           git config user.email "eve-release-bot@users.noreply.github.com"
           git tag -f latest source
           git -c credential.helper='!f() { echo username=x-access-token; echo password="${GH_TOKEN}"; }; f' \
             push -f origin latest
-          echo "latest=$(git rev-parse latest)"
+          git rev-parse latest
+      - name: Publish the full-release latest alias
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          gh release create latest \
+            --repo "${{ github.repository }}" \
+            --title "EVE latest" \
+            --verify-tag \
+            --latest \
+            --notes "Mutable convenience alias for ${TARGET_TAG}. Canonical immutable release: https://github.com/${{ github.repository }}/releases/tag/${TARGET_TAG}."
+          gh release upload latest \
+            --repo "${{ github.repository }}" \
+            --clobber \
+            latest-assets/*

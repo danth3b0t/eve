@@ -37,9 +37,9 @@ Do not commit `dist/` or generated symbols, and do not serve artifacts from a mu
 
 GitHub's normal `latest` release notation is metadata, not a mutable Git tag: the GitHub REST `releases/latest` endpoint returns the newest published **full** release and excludes drafts/prereleases. EVE retains immutable `vMAJOR.MINOR.PATCH[-suffix]` tags and never moves them after publication.
 
-For compatibility tooling that follows a branch/tag rather than a Release asset, `.github/workflows/latest-alias.yml` additionally maintains one floating Git tag named `latest`. It runs only after a release is actually published (or by explicit workflow-dispatch recovery), fetches the immutable published tag, and force-moves `latest` to that same commit. It does not retag the version tag, alter release assets, or relabel any GitHub Release. Concurrency is serialized, and recovery uses the workflow input rather than manual tag mutation.
+For compatibility tooling that follows tags or `mise github:...@latest`, `.github/workflows/latest-alias.yml` maintains two deliberate aliases: the floating Git tag `latest` and a mutable full GitHub Release with the same tag/assets. It runs only after an immutable release is actually published (or by workflow-dispatch recovery), verifies the immutable asset checksums, deletes only the previous `latest` alias release, force-moves the Git tag, and uploads identical assets to a fresh alias release with the canonical prerelease link in its notes. It never retags version tags or alters immutable release assets. Concurrency is serialized so clients do not see two competing alias releases.
 
-Consumers should prefer immutable version tags for reproducibility. Treat `latest` only as the documented floating convenience alias, currently tracking the newest published preview until the first stable release.
+Because the alias itself is published as a full release, GitHub's `releases/latest` endpoint and default `mise` resolution can return it even while the linked canonical release is still a preview. That is a deliberate documented alias, not a stable-support claim.
 
 ## Runtime requirements
 
