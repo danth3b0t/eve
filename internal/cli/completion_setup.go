@@ -125,6 +125,7 @@ func shellGuide(shell string) shellSetupGuide {
 	}}}, Verification: []string{
 		"In an initialized shell you may inspect: print -r -- 'eve -> ' ${+_comps[eve]}",
 		"Then perform a real Tab request: eve completion <Tab>",
+		"Optional fuzzy selection with fzf installed and its completion integration loaded: eve completion **<Tab>. Override the trigger with EVE_FZF_COMPLETION_TRIGGER or disable EVE's bridge with EVE_FZF_COMPLETION=0.",
 		"For immediate registration in the current shell after fpath/compdef are ready: autoload -Uz _eve; compdef _eve eve",
 	}, Removal: []string{
 		"Current initialized session: compdef -d eve",

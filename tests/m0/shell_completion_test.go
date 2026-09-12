@@ -247,3 +247,27 @@ func TestFZFTriggerSelectsEveCandidate(t *testing.T) {
 		t.Fatalf("FZF trigger did not select EVE's semantic candidate:\n%s", output)
 	}
 }
+
+func TestFZFTriggerSelectsEveCandidateZsh(t *testing.T) {
+	if _, err := exec.LookPath("fzf"); err != nil {
+		t.Skip("fzf is unavailable")
+	}
+	harness := completionShellHarness(t)
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is unavailable")
+	}
+	steps := []ptyStep{
+		{Text: "autoload -Uz compinit\ncompinit -i\n", Pause: 450 * time.Millisecond},
+		{Text: "source " + harness.zshScript + "\n", Pause: 350 * time.Millisecond},
+		{Text: "source /usr/share/fzf/completion.zsh\n", Pause: 350 * time.Millisecond},
+		{Text: "eve completion **\t", WaitFor: "eve completion bash", Timeout: 10 * time.Second},
+		{Text: "\003", Pause: 250 * time.Millisecond},
+		{Text: "exit\n"},
+	}
+	t.Setenv("FZF_DEFAULT_OPTS", "--filter=bash")
+	output := interactivePTY(t, zsh, []string{"-f", "-i"}, filepath.Join(harness.base, "typescript-fzf-zsh"), steps, filepath.Dir(harness.binary))
+	if strings.Contains(output, "E_USAGE") || strings.Contains(output, "_fzf_complete_eve: command not found") {
+		t.Fatalf("Zsh FZF trigger failed:\n%s", output)
+	}
+}

@@ -128,7 +128,7 @@ The completion family has real `bash`, `zsh`, and `setup` children. `eve complet
 
 Candidate providers use one 150 ms request deadline, read-only bounded registry/Git/package snapshots, full-UUID GC scopes, command-specific workspace/create/sync/resume policies, local heads/tags/cached remote refs, profiles, projects, backend paths, and declared service IDs. They do not initialize/migrate state, read credential objects, fetch, contact Convex, evaluate dotenvs or mutate startup files. Active Help respects Cobra and `EVE_ACTIVE_HELP=0` degradation.
 
-Regression coverage includes bare/nested/JSON help, mixed interspersed flags, `--` literals, argument/default metadata drift, unsupported shells/flags, setup shell hinting, state/global GC UUID candidates, selector/continuation distinctions, no-description protocol equality, isolated state, Bash 5/Zsh 5.9 syntax checks, real PTY insertion, and an actual fzf trigger selection. `go test ./...` passes on Linux; shell PTY evidence is Linux in this workspace, while shell support remains Linux/macOS scoped.
+Regression coverage includes bare/nested/JSON help, mixed interspersed flags, `--` literals, argument/default metadata drift, unsupported shells/flags, setup shell hinting, state/global GC UUID candidates, selector/continuation distinctions, no-description protocol equality, isolated state, Bash 5/Zsh 5.9 syntax checks, real PTY insertion, and actual fzf trigger selection in both shells. `go test ./...` passes on Linux; shell PTY evidence is Linux in this workspace, while shell support remains Linux/macOS scoped.
 
 ## Completed-review stabilization
 

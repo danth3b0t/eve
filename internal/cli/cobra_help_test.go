@@ -90,6 +90,9 @@ func TestCompletionGeneratorsUseCommandTreeOnly(t *testing.T) {
 		if shell == "bash" && !strings.Contains(stdout, "__eve_fzf_complete") {
 			t.Fatal("Bash script lost the FZF trigger bridge")
 		}
+		if shell == "zsh" && !strings.Contains(stdout, "_fzf_complete_eve") {
+			t.Fatal("Zsh script lost the FZF trigger bridge")
+		}
 		probeCode, probeOut, _ := runHelpProbe(t, "__complete", "")
 		probeNoDescCode, probeNoDescOut, _ := runHelpProbe(t, "__completeNoDesc", "")
 		if probeNoDescCode != 0 {

@@ -177,6 +177,36 @@ __eve_fzf_complete()
 
 `
 
+const zshFZFCompletion = `
+_fzf_complete_eve_post() {
+  awk -F '\t' '{print $1}'
+}
+
+_fzf_complete_eve() {
+  if [[ ${EVE_FZF_COMPLETION-} == 0 ]]; then
+    zle ${fzf_default_completion:-expand-or-complete}
+    return
+  fi
+
+  local -a requestArgs tokens
+  tokens=(${(zv)1})
+  (( ${#tokens[@]} )) || return 1
+  requestArgs=("${tokens[@]:1}")
+  requestArgs+=("${prefix}")
+
+  local protocolPacket protocolDirective candidateText
+  protocolPacket=$("${tokens[1]}" __complete "${requestArgs[@]}" 2>/dev/null)
+  protocolDirective="${protocolPacket##*:}"
+  [[ ${protocolDirective} != "${protocolPacket}" && ${protocolDirective} == [0-9]* ]] || return
+  candidateText="${protocolPacket%:*}"
+
+  _fzf_complete +m -- "$@" < <(
+    printf '%s\n' "${candidateText}" | awk 'index($0, "_activeHelp_ ") != 1'
+  )
+}
+
+`
+
 func adaptBashTransport(raw, buffer *bytes.Buffer) error {
 	text := string(raw.Bytes())
 	requestCommand := "__complete"
@@ -213,6 +243,7 @@ func adaptZshTransport(raw, buffer *bytes.Buffer) error {
 		requestCommand = "__completeNoDesc"
 	}
 	replacements := [][2]string{
+		{"#compdef eve\n", "#compdef eve\n" + zshFZFCompletion},
 		{"    local lastParam lastChar flagPrefix requestComp out directive comp lastComp noSpace keepOrder\n", "    local lastParam lastChar flagPrefix out directive comp lastComp keepOrder requestExecutable\n    local -a requestArgs flagPrefixArgs keepOrderArgs noSpaceArgs\n"},
 		{"        flagPrefix=\"-P ${BASH_REMATCH}\"\n", "        flagPrefix=\"-P ${BASH_REMATCH}\"\n        flagPrefixArgs=(-P \"${BASH_REMATCH}\")\n"},
 		{"    requestComp=\"${words[1]} " + requestCommand + " ${words[2,-1]}\"\n", "    requestExecutable=\"${words[1]}\"\n    requestArgs=(" + requestCommand + " \"${words[@]:1}\")\n"},
