@@ -33,6 +33,14 @@ dist/SHA256SUMS.txt
 
 Do not commit `dist/` or generated symbols, and do not serve artifacts from a mutable build directory. There is no updater, telemetry, implicit network call, background service or package-manager magic.
 
+## `latest` alias policy
+
+GitHub's normal `latest` release notation is metadata, not a mutable Git tag: the GitHub REST `releases/latest` endpoint returns the newest published **full** release and excludes drafts/prereleases. EVE retains immutable `vMAJOR.MINOR.PATCH[-suffix]` tags and never moves them after publication.
+
+For compatibility tooling that follows a branch/tag rather than a Release asset, `.github/workflows/latest-alias.yml` additionally maintains one floating Git tag named `latest`. It runs only after a release is actually published (or by explicit workflow-dispatch recovery), fetches the immutable published tag, and force-moves `latest` to that same commit. It does not retag the version tag, alter release assets, or relabel any GitHub Release. Concurrency is serialized, and recovery uses the workflow input rather than manual tag mutation.
+
+Consumers should prefer immutable version tags for reproducibility. Treat `latest` only as the documented floating convenience alias, currently tracking the newest published preview until the first stable release.
+
 ## Runtime requirements
 
 Git is the only required external executable for core EVE operations. Applications still need their ordinary runtimes/package managers (Bun/Node/etc.) managed outside EVE. Live Convex operations need the authorized environment/profile.

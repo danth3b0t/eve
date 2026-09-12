@@ -1,0 +1,55 @@
+name: Publish latest alias
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published immutable version tag to alias (for recovery)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: latest-alias
+  cancel-in-progress: true
+
+jobs:
+  alias-latest:
+    name: Move the `latest` tag to the published version
+    runs-on: ubuntu-24.04
+    env:
+      TARGET_TAG: ${{ github.event.release.tag_name || inputs.version }}
+    steps:
+      - name: Reject missing target
+        run: |
+          set -eu
+          if [ -z "${TARGET_TAG}" ]; then
+            echo 'release tag_name is absent and no recovery version was supplied' >&2
+            exit 1
+          fi
+      - name: Fetch the immutable version tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git init -q latest-alias
+          cd latest-alias
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+          git -c credential.helper='!f() { echo username=x-access-token; echo password="${GH_TOKEN}"; }; f' \
+            -c protocol.version=2 fetch --no-tags --depth=1 origin "refs/tags/${TARGET_TAG}:refs/tags/source"
+      - name: Move the floating latest tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          cd latest-alias
+          git config user.name "eve-release-bot"
+          git config user.email "eve-release-bot@users.noreply.github.com"
+          git tag -f latest source
+          git -c credential.helper='!f() { echo username=x-access-token; echo password="${GH_TOKEN}"; }; f' \
+            push -f origin latest
+          echo "latest=$(git rev-parse latest)"
