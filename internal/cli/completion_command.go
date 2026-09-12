@@ -218,7 +218,7 @@ func adaptBashTransport(raw, buffer *bytes.Buffer) error {
 		{"    local requestComp lastParam lastChar args\n", "    local lastParam lastChar args requestExecutable\n"},
 		{"    args=(\"${words[@]:1}\")\n    requestComp=\"${words[0]} " + requestCommand + " ${args[*]}\"\n", "    args=(" + requestCommand + " \"${words[@]:1}\")\n    requestExecutable=\"${words[0]}\"\n"},
 		{"        requestComp=\"${requestComp} ''\"\n", "        args+=(\"\")\n"},
-		{"    if [[ -z ${cur} && ${lastChar} != = ]]; then\n", "    if [[ -z ${cur} && ${lastChar} != = && ${lastParam} != *=* ]]; then\n"},
+		{"    if [[ -z ${cur} && ${lastChar} != = ]]; then\n", "    if [[ -z ${cur} && ${lastChar} != = && ${lastParam} != *=* && (${#args[@]} == 0 || -n ${args[-1]}) ]]; then\n"},
 		{"    __eve_debug \"Calling ${requestComp}\"\n    # Use eval to handle any environment variables and such\n    out=$(eval \"${requestComp}\" 2>/dev/null)\n", "    if __eve_fzf_complete; then\n        return\n    fi\n\n    __eve_debug \"Calling EVE completion adapter\"\n    out=$(\"${requestExecutable}\" \"${args[@]}\" 2>/dev/null)\n"},
 		{"if [[ $(type -t compopt) = \"builtin\" ]]; then\n    complete -o default -F __start_eve eve\nelse\n    complete -o default -o nospace -F __start_eve eve\nfi\n", "complete -o nospace -F __start_eve eve\n"},
 	}
@@ -248,7 +248,7 @@ func adaptZshTransport(raw, buffer *bytes.Buffer) error {
 		{"        flagPrefix=\"-P ${BASH_REMATCH}\"\n", "        flagPrefix=\"-P ${BASH_REMATCH}\"\n        flagPrefixArgs=(-P \"${BASH_REMATCH}\")\n"},
 		{"    requestComp=\"${words[1]} " + requestCommand + " ${words[2,-1]}\"\n", "    requestExecutable=\"${words[1]}\"\n    requestArgs=(" + requestCommand + " \"${words[@]:1}\")\n"},
 		{"        requestComp=\"${requestComp} \\\"\\\"\"\n", "        requestArgs+=(\"\")\n"},
-		{"    if [ \"${lastChar}\" = \"\" ]; then\n", "    if [[ -z \"${lastChar}\" && \"${lastParam}\" != *=* ]]; then\n"},
+		{"    if [ \"${lastChar}\" = \"\" ]; then\n", "    if [[ -z \"${lastChar}\" && \"${lastParam}\" != *=* && (${#requestArgs[@]} == 0 || -n \"${requestArgs[-1]}\") ]]; then\n"},
 		{"    __eve_debug \"About to call: eval ${requestComp}\"\n\n    # Use eval to handle any environment variables and such\n    out=$(eval ${requestComp} 2>/dev/null)\n", "    __eve_debug \"Calling EVE completion adapter\"\n    out=$(\"${requestExecutable}\" \"${requestArgs[@]}\" 2>/dev/null)\n"},
 		{"        noSpace=\"-S ''\"\n", "        noSpaceArgs=(-S \"\")\n"},
 		{"        keepOrder=\"-V\"\n", "        keepOrderArgs=(-V)\n"},

@@ -122,6 +122,44 @@ func interactivePTY(t *testing.T, shellExe string, shellArgs []string, scriptPat
 	return output.String()
 }
 
+func TestEmptyRootCompletionListsCandidates(t *testing.T) {
+	harness := completionShellHarness(t)
+	for _, tc := range []struct {
+		name  string
+		exe   string
+		args  []string
+		setup string
+		tabs  string
+	}{
+		{"bash", "/usr/bin/bash", []string{"--noprofile", "--norc", "-i"}, "source /usr/share/bash-completion/bash_completion\nsource " + harness.bashScript, "\t\t"},
+		{"zsh", "/usr/bin/zsh", []string{"-f", "-i"}, "autoload -Uz compinit\ncompinit -i\nsource " + harness.zshScript, "\t"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := exec.LookPath(tc.exe); err != nil {
+				t.Skip(tc.exe + " is unavailable")
+			}
+			if tc.name == "bash" {
+				if _, err := os.Stat("/usr/share/bash-completion/bash_completion"); err != nil {
+					t.Skip("bash-completion is unavailable")
+				}
+			}
+			steps := []ptyStep{
+				{Text: tc.setup + "\n", Pause: 400 * time.Millisecond},
+				{Text: "eve " + tc.tabs, WaitFor: "auth", Timeout: 10 * time.Second},
+				{Text: "\003", Pause: 250 * time.Millisecond},
+				{Text: "exit\n"},
+			}
+			output := interactivePTY(t, tc.exe, tc.args, filepath.Join(harness.base, "typescript-empty-"+tc.name), steps, filepath.Dir(harness.binary))
+			if !strings.Contains(output, "completion") || !strings.Contains(output, "create") {
+				t.Fatalf("empty root completion missing command candidates:\n%s", output)
+			}
+			if strings.Contains(output, "LICENSE") && !strings.Contains(output, "Generate or set up shell completions") {
+				t.Fatalf("empty root completion fell back to filenames:\n%s", output)
+			}
+		})
+	}
+}
+
 func staticInsertionSteps(base, sourceScript, bashCompletion string) (marker string, steps []ptyStep) {
 	marker = filepath.Join(base, "marker")
 	steps = []ptyStep{
